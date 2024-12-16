@@ -1,0 +1,10 @@
+2024-12-15 17:11:15 INFO  [ldk_node::builder:1160] Successfully migrated OutputSweeper data.
+2024-12-15 17:11:15 INFO  [ldk_node:232] Starting up LDK Node with node ID 03634272fe9904f9bf7331a30104438c4fdc695d77a724a8252059241bcd3db38a on network: signet
+2024-12-15 17:11:15 INFO  [ldk_node::chain:822] Fee rate cache update finished in 464ms.
+2024-12-15 17:11:15 INFO  [ldk_node:634] Startup complete.
+2024-12-15 17:11:15 DEBUG [lightning::chain::chainmonitor:718] New best block 000000cd3eedfdfecb2b6d21a84b75f847dcdd1ce2fe41b4abd7ee1bf7a16ec0 at height 1687334 provided via best_block_updated
+2024-12-15 17:11:16 DEBUG [lightning_transaction_sync::esplora:239] Finished transaction sync at tip 000000cd3eedfdfecb2b6d21a84b75f847dcdd1ce2fe41b4abd7ee1bf7a16ec0 in 583ms: 0 confirmed, 0 unconfirmed.
+2024-12-15 17:11:16 INFO  [ldk_node::chain:561] Sync of Lightning wallet finished in 584ms.
+2024-12-15 17:11:17 INFO  [ldk_node::chain:500] Sync of on-chain wallet finished in 1644ms.
+2024-12-15 17:11:22 INFO  [ldk_node:644] Shutting down LDK Node with node ID 03634272fe9904f9bf7331a30104438c4fdc695d77a724a8252059241bcd3db38a...
+2024-12-15 17:11:22 INFO  [ldk_node:709] Shutdown complete.

@@ -1,0 +1,18 @@
+[package]
+name = "my_app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ldk-node = "0.4.0"
+eframe = "0.22"
+egui = "0.22"
+
+[dev-dependencies]
+cargo-bundle = "0.6"
+
+[package.metadata.bundle]
+name = "MyApp"
+identifier = "com.example.myapp"
+icon = ["icon.png"]
+resources = ["assets"]
