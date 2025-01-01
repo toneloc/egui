@@ -9,7 +9,12 @@ use ldk_node::{
         secp256k1::PublicKey,
         Network,
     },
-    lightning::ln::msgs::SocketAddress,
+    lightning::{
+        ln::{
+            msgs::SocketAddress, 
+            types:: ChannelId},
+        offers::offer::Offer,
+    },
     Builder, Node, ChannelDetails,
 };
 use hex;
@@ -45,6 +50,8 @@ struct MyApp {
     channel_list: Vec<ChannelDetails>,
     channel_list_string: String,
     dot_counter: usize,
+    stable_channel: StableChannel,
+    showing_channels: bool,
 }
 
 fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
@@ -73,8 +80,35 @@ impl MyApp {
         let bytes =
             hex::decode("03c5a9b32688c82cc1efa7c205390ef10444d8d6a412af91aa429f7bf34bb19c11")
                 .unwrap();
-        let lsp_pubkey = PublicKey::from_slice(&bytes).ok();
-        let user = make_node("user", 9736, lsp_pubkey);
+        let lsp_pubkey = PublicKey::from_slice(&bytes).ok().unwrap();
+        let user = make_node("user", 9736, Some(lsp_pubkey));
+
+        let channel_id_bytes: [u8; 32] = [0; 32];
+        // let channel_id_bytes: [u8; 32] = hex::decode(channel_id)
+        //     .expect("Invalid hex string")
+        //     .try_into()
+        //     .expect("Decoded channel ID has incorrect length");
+
+        let mut stable_channel = StableChannel {
+            channel_id: ChannelId::from_bytes(channel_id_bytes),
+            is_stable_receiver: true,  
+            counterparty: lsp_pubkey,
+            expected_usd: USD::from_f64(0.0),
+            expected_btc: Bitcoin::from_btc(0.0),
+            stable_receiver_btc: Bitcoin::from_btc(0.0),
+            stable_provider_btc: Bitcoin::from_btc(0.0),  
+            stable_receiver_usd: USD::from_f64(0.0),
+            stable_provider_usd: USD::from_f64(0.0),
+            risk_level: 0, 
+            timestamp: 0,
+            formatted_datetime: "2021-06-01 12:00:00".to_string(), 
+            payment_made: false,
+            sc_dir: "/path/to/sc_dir".to_string(),
+            latest_price: 0.0, 
+            prices: "".to_string(),           
+        };
+
+        println!("Stable Channel created: {:?}", stable_channel.channel_id.to_string());
 
         Self {
             user_data: UserData::default(),
@@ -84,8 +118,10 @@ impl MyApp {
             channel_list: Vec::new(),
             channel_list_string: String::new(),
             dot_counter: 0,
+            stable_channel,
+            showing_channels: false,
         }
-    }
+}
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
         let _connected = self.user.connect(
