@@ -5,14 +5,9 @@ mod types;
 use eframe::{egui, App, Frame};
 use egui::{TextureHandle, TextureOptions};
 use ldk_node::{
-    bitcoin::{
-        secp256k1::PublicKey,
-        Network,
-    },
+    bitcoin::{secp256k1::PublicKey, Address, Network},
     lightning::{
-        ln::{
-            msgs::SocketAddress, 
-            types:: ChannelId},
+        ln::{msgs::SocketAddress, types::ChannelId},
         offers::offer::Offer,
     },
     Builder, Node, ChannelDetails,
@@ -27,7 +22,7 @@ use types::{Bitcoin, StableChannel, USD};
 struct UserData {
     is_onboarding: bool,
     has_paid_initial_invoice: bool,
-    waiting_for_onboarding: bool,
+    waiting_for_invoice_payment: bool,
     public_key: u64,
 }
 
@@ -36,7 +31,7 @@ impl Default for UserData {
         Self {
             is_onboarding: true,
             has_paid_initial_invoice: false,
-            waiting_for_onboarding: false,
+            waiting_for_invoice_payment: false,
             public_key: 0x123,
         }
     }
@@ -52,6 +47,8 @@ struct MyApp {
     dot_counter: usize,
     stable_channel: StableChannel,
     showing_channels: bool,
+    close_channel_address: String,
+    network: Network,
 }
 
 fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
@@ -77,38 +74,38 @@ fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
 
 impl MyApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let bytes =
-            hex::decode("03c5a9b32688c82cc1efa7c205390ef10444d8d6a412af91aa429f7bf34bb19c11")
-                .unwrap();
+        let bytes = hex::decode(
+            "03c5a9b32688c82cc1efa7c205390ef10444d8d6a412af91aa429f7bf34bb19c11",
+        )
+        .unwrap();
         let lsp_pubkey = PublicKey::from_slice(&bytes).ok().unwrap();
         let user = make_node("user", 9736, Some(lsp_pubkey));
 
         let channel_id_bytes: [u8; 32] = [0; 32];
-        // let channel_id_bytes: [u8; 32] = hex::decode(channel_id)
-        //     .expect("Invalid hex string")
-        //     .try_into()
-        //     .expect("Decoded channel ID has incorrect length");
 
         let mut stable_channel = StableChannel {
             channel_id: ChannelId::from_bytes(channel_id_bytes),
-            is_stable_receiver: true,  
+            is_stable_receiver: true,
             counterparty: lsp_pubkey,
             expected_usd: USD::from_f64(0.0),
             expected_btc: Bitcoin::from_btc(0.0),
             stable_receiver_btc: Bitcoin::from_btc(0.0),
-            stable_provider_btc: Bitcoin::from_btc(0.0),  
+            stable_provider_btc: Bitcoin::from_btc(0.0),
             stable_receiver_usd: USD::from_f64(0.0),
             stable_provider_usd: USD::from_f64(0.0),
-            risk_level: 0, 
+            risk_level: 0,
             timestamp: 0,
-            formatted_datetime: "2021-06-01 12:00:00".to_string(), 
+            formatted_datetime: "2021-06-01 12:00:00".to_string(),
             payment_made: false,
             sc_dir: "/path/to/sc_dir".to_string(),
-            latest_price: 0.0, 
-            prices: "".to_string(),           
+            latest_price: 0.0,
+            prices: "".to_string(),
         };
 
-        println!("Stable Channel created: {:?}", stable_channel.channel_id.to_string());
+        println!(
+            "Stable Channel created: {:?}",
+            stable_channel.channel_id.to_string()
+        );
 
         Self {
             user_data: UserData::default(),
@@ -120,15 +117,17 @@ impl MyApp {
             dot_counter: 0,
             stable_channel,
             showing_channels: false,
+            close_channel_address: String::new(),
+            network: Network::Signet,
         }
-}
+    }
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
         let _connected = self.user.connect(
             PublicKey::from_str("024fa3625dbcf4511e5d0b28ec3cf590eb8bf31fc4d3a7dc3fa282a5ce4ecd6623")
                 .unwrap(),
             SocketAddress::from_str("127.0.0.1:9735").unwrap(),
-            true
+            true,
         );
 
         let result = self.user.bolt11_payment().receive_via_jit_channel(
@@ -204,6 +203,30 @@ impl MyApp {
         self.channel_list = channels;
     }
 
+    fn close_channels_to_address(&mut self) {
+        // Close all channels
+        for channel in self.user.list_channels().iter() {
+            let user_channel_id = channel.user_channel_id;
+            let counterparty_node_id = channel.counterparty_node_id;
+            let _ = self.user.close_channel(&user_channel_id, counterparty_node_id);
+        }
+        println!("Closing all channels.");
+
+        // Withdraw everything to address
+        let address_str = &self.close_channel_address;
+        match Address::from_str(address_str) {
+            Ok(addr) => match addr.require_network(self.network) {
+                Ok(addr_checked) => {
+                    match self.user.onchain_payment().send_all_to_address(&addr_checked) {
+                        Ok(txid) => println!("{}", txid),
+                        Err(e) => eprintln!("Error: {}", e),
+                    }
+                }
+                Err(_) => eprintln!("Invalid address for this network"),
+            },
+            Err(_) => eprintln!("Invalid address"),
+        }
+    }
 }
 
 impl App for MyApp {
@@ -213,12 +236,18 @@ impl App for MyApp {
                 ui.heading("Stable Channels ⚖️💵⚡");
 
                 if self.user_data.is_onboarding {
-                    if !self.user_data.waiting_for_onboarding {
+                    self.list_channels();
+                    if !self.channel_list.is_empty() {
+                        self.user_data.waiting_for_invoice_payment = false;
+                        self.user_data.is_onboarding = false;
+                    }
+
+                    if !self.user_data.waiting_for_invoice_payment && !self.user_data.has_paid_initial_invoice {
                         if ui.button("create a $100 stable channel").clicked() {
                             self.get_jit_invoice(ctx);
-                            self.user_data.waiting_for_onboarding = true;
+                            self.user_data.waiting_for_invoice_payment = true;
                         }
-                    } else {
+                    } else if self.user_data.waiting_for_invoice_payment {
                         if let Some(ref qr) = self.qr_texture {
                             ui.image(qr, qr.size_vec2());
                         } else {
@@ -226,14 +255,13 @@ impl App for MyApp {
                         }
                         ui.add(
                             egui::TextEdit::singleline(&mut self.invoice_result)
-                                .hint_text("Invoice...")
+                                .hint_text("Invoice..."),
                         );
                         if ui.button("Copy Invoice").clicked() {
                             ctx.output_mut(|o| {
                                 o.copied_text = self.invoice_result.clone();
                             });
                         }
-                        // Show dots
                         self.dot_counter = (self.dot_counter + 1) % 7;
                         let dots = ".".repeat(self.dot_counter);
                         ui.label(dots);
@@ -241,33 +269,39 @@ impl App for MyApp {
                         if ui.button("Check Channels").clicked() {
                             self.list_channels();
                             if !self.channel_list.is_empty() {
-                                // If there's at least one channel, go next
-                                self.user_data.waiting_for_onboarding = false;
+                                self.user_data.waiting_for_invoice_payment = false;
                                 self.user_data.is_onboarding = false;
                             }
                         }
                         ui.label(&self.channel_list_string);
 
-                        if ui.button("advance").clicked() {
-                            self.user_data.waiting_for_onboarding = false;
-                            self.user_data.is_onboarding = false;
+                        if ui.button("Back").clicked() {
+                            self.user_data.waiting_for_invoice_payment = false;
                         }
                     }
                 } else {
-                    let balances = self.user.list_balances(); let onchain_balance = Bitcoin::from_sats(balances.total_onchain_balance_sats); let lightning_balance = Bitcoin::from_sats(balances.total_lightning_balance_sats); ui.label(format!("On-Chain Balance: {}", onchain_balance)); ui.label(format!("Lightning Balance: {}", lightning_balance));
                     let balances = self.user.list_balances();
                     let onchain_balance = Bitcoin::from_sats(balances.total_onchain_balance_sats);
                     let lightning_balance = Bitcoin::from_sats(balances.total_lightning_balance_sats);
-
-                    ui.label(format!("On-chain: {}", onchain_balance));
-                    ui.label(format!("Lightning: {}", lightning_balance));
+                    ui.label(format!("On-Chain Balance: {}", onchain_balance));
+                    ui.label(format!("Lightning Balance: {}", lightning_balance));
                     ui.heading("$100.000");
                     ui.label(".00234 bitcoin");
+
                     if ui.button("List Channels").clicked() {
                         self.list_channels();
                     }
                     ui.label(&self.channel_list_string);
 
+                    // Address entry + close channels button
+                    ui.text_edit_singleline(&mut self.close_channel_address);
+                    if ui.button("Close channel to address").clicked() {
+                        self.close_channels_to_address();
+                    }
+
+                    if ui.button("Back").clicked() {
+                        self.user_data.is_onboarding = true;
+                    }
                 }
             });
         });
