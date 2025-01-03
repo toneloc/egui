@@ -210,7 +210,13 @@ impl MyApp {
             let counterparty_node_id = channel.counterparty_node_id;
             let _ = self.user.close_channel(&user_channel_id, counterparty_node_id);
         }
-        println!("Closing all channels.");
+        println!("Closing channel. Please wait.");
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        println!("Closing channel. Please wait ..");
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        println!("Closing channel. Please wait ...");
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        println!("Closing channel. Please wait ....");
 
         // Withdraw everything to address
         let address_str = &self.close_channel_address;
@@ -285,9 +291,6 @@ impl App for MyApp {
                     let lightning_balance = Bitcoin::from_sats(balances.total_lightning_balance_sats);
                     ui.label(format!("On-Chain Balance: {}", onchain_balance));
                     ui.label(format!("Lightning Balance: {}", lightning_balance));
-                    ui.heading("$100.000");
-                    ui.label(".00234 bitcoin");
-
                     if ui.button("List Channels").clicked() {
                         self.list_channels();
                     }
