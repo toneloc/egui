@@ -1,6 +1,7 @@
 use std::{any::Any, str::FromStr};
 
 mod types;
+mod price_feeds;
 
 use eframe::{egui, App, Frame};
 use egui::{TextureHandle, TextureOptions};
@@ -15,8 +16,13 @@ use ldk_node::{
 use hex;
 use image::{GrayImage, Luma};
 use qrcode::{Color, QrCode};
+use ureq::Agent;
+
+use std::time::{Instant, Duration};
 
 use types::{Bitcoin, StableChannel, USD};
+use price_feeds::{calculate_median_price, fetch_prices, set_price_feeds};
+
 
 #[derive(Clone)]
 struct UserData {
@@ -38,6 +44,7 @@ impl Default for UserData {
 }
 
 struct MyApp {
+    last_stability_check: Instant,
     user_data: UserData,
     invoice_result: String,
     user: Node,
@@ -108,6 +115,7 @@ impl MyApp {
         );
 
         Self {
+            last_stability_check: Instant::now(),
             user_data: UserData::default(),
             invoice_result: String::new(),
             user,
@@ -120,6 +128,149 @@ impl MyApp {
             close_channel_address: String::new(),
             network: Network::Signet,
         }
+    }
+
+    /// Core stability logic
+    fn check_stability(node: &Node, mut sc: StableChannel) -> StableChannel {
+        sc.latest_price = fetch_prices(&Agent::new(), &set_price_feeds())
+        .and_then(|prices| calculate_median_price(prices))
+        .unwrap_or(0.0);
+
+        if let Some(channel) = node
+            .list_channels()
+            .iter()
+            .find(|c| c.channel_id == sc.channel_id)
+        {
+            sc = Self::update_balances(sc, Some(channel.clone()));
+        }
+
+        let mut dollars_from_par: USD = sc.stable_receiver_usd - sc.expected_usd;
+        let mut percent_from_par = ((dollars_from_par / sc.expected_usd) * 100.0).abs();
+
+        println!("{:<25} {:>15}", "Expected USD:", sc.expected_usd);
+        println!("{:<25} {:>15}", "User USD:", sc.stable_receiver_usd);
+        println!("{:<25} {:>5}", "Percent from par:", format!("{:.2}%\n", percent_from_par));
+
+        println!("{:<25} {:>15}", "User BTC:", sc.stable_receiver_btc);
+        println!("{:<25} {:>15}", "LSP USD:", sc.stable_provider_usd);
+
+        enum Action {
+            Wait,
+            Pay,
+            DoNothing,
+            HighRisk,
+        }
+
+        let action = if percent_from_par < 0.1 {
+            Action::DoNothing
+        } else {
+            let is_receiver_below_expected: bool = sc.stable_receiver_usd < sc.expected_usd;
+
+            match (sc.is_stable_receiver, is_receiver_below_expected, sc.risk_level > 100) {
+                (_, _, true) => Action::HighRisk, // High risk scenario
+                (true, true, false) => Action::Wait,   // We are User and below peg, wait for payment
+                (true, false, false) => Action::Pay,   // We are User and above peg, need to pay
+                (false, true, false) => Action::Pay,   // We are LSP and below peg, need to pay
+                (false, false, false) => Action::Wait, // We are LSP and above peg, wait for payment
+            }
+        };
+
+        match action {
+            Action::DoNothing => println!("\nDifference from par less than 0.1%. Doing nothing."),
+            Action::Wait => {
+                println!("\nWaiting 10 seconds and checking on payment...\n");
+                std::thread::sleep(std::time::Duration::from_secs(10));
+
+                if let Some(channel) = node
+                    .list_channels()
+                    .iter()
+                    .find(|c| c.channel_id == sc.channel_id)
+                {
+                    sc = Self::update_balances(sc, Some(channel.clone()));
+                }
+
+                println!("{:<25} {:>15}", "Expected USD:", sc.expected_usd);
+                println!("{:<25} {:>15}", "User USD:", sc.stable_receiver_usd);
+
+                dollars_from_par = sc.stable_receiver_usd - sc.expected_usd;
+                percent_from_par = ((dollars_from_par / sc.expected_usd) * 100.0).abs();
+
+                println!(
+                    "{:<25} {:>5}",
+                    "Percent from par:",
+                    format!("{:.2}%\n", percent_from_par)
+                );
+
+                println!("{:<25} {:>15}", "LSP USD:", sc.stable_provider_usd);
+            }
+            Action::Pay => {
+                println!("\nPaying the difference...\n");
+
+                let amt = USD::to_msats(dollars_from_par, sc.latest_price);
+
+                // let result = node.bolt12_payment().send_using_amount(
+                //     &sc.counterparty_offer,
+                //     amt,
+                //     None,
+                //     Some("here ya go".to_string()),
+                // );
+
+                // This is keysend / spontaneous payment code you can use if Bolt12 doesn't work
+
+                // First, ensure we are connected
+                // let result = node.connect(sc.counterparty, sc.counterparty_net_address, true);
+
+                // if let Err(e) = result {
+                //     println!("Failed to connect with : {}", e);
+                // } else {
+                //     println!("Successfully connected.");
+                // }
+
+                let result = node
+                    .spontaneous_payment()
+                    .send(amt, sc.counterparty,None);
+                match result {
+                    Ok(payment_id) => println!("Payment sent successfully with payment ID: {}", payment_id),
+                    Err(e) => println!("Failed to send payment: {}", e),
+                }
+
+            }
+            Action::HighRisk => {
+                println!("Risk level high. Current risk level: {}", sc.risk_level);
+            }
+        }
+        sc
+    }
+    
+    fn update_balances(
+        mut sc: StableChannel,
+        channel_details: Option<ChannelDetails>,
+    ) -> StableChannel {
+        let (our_balance, their_balance) = match channel_details {
+            Some(channel) => {
+                let unspendable_punishment_sats = channel.unspendable_punishment_reserve.unwrap_or(0);
+                let our_balance_sats =
+                    (channel.outbound_capacity_msat / 1000) + unspendable_punishment_sats;
+                let their_balance_sats = channel.channel_value_sats - our_balance_sats;
+                (our_balance_sats, their_balance_sats)
+            }
+            None => (0, 0), // Handle the case where channel_details is None
+        };
+
+        // Update balances based on whether this is a User or provider
+        if sc.is_stable_receiver {
+            sc.stable_receiver_btc = Bitcoin::from_sats(our_balance);
+            sc.stable_receiver_usd = USD::from_bitcoin(sc.stable_receiver_btc, sc.latest_price);
+            sc.stable_provider_btc = Bitcoin::from_sats(their_balance);
+            sc.stable_provider_usd = USD::from_bitcoin(sc.stable_provider_btc, sc.latest_price);
+        } else {
+            sc.stable_provider_btc = Bitcoin::from_sats(our_balance);
+            sc.stable_provider_usd = USD::from_bitcoin(sc.stable_provider_btc, sc.latest_price);
+            sc.stable_receiver_btc = Bitcoin::from_sats(their_balance);
+            sc.stable_receiver_usd = USD::from_bitcoin(sc.stable_receiver_btc, sc.latest_price);
+        }
+
+        sc // Return the modified StableChannel
     }
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
@@ -210,13 +361,6 @@ impl MyApp {
             let counterparty_node_id = channel.counterparty_node_id;
             let _ = self.user.close_channel(&user_channel_id, counterparty_node_id);
         }
-        println!("Closing channel. Please wait.");
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        println!("Closing channel. Please wait ..");
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        println!("Closing channel. Please wait ...");
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        println!("Closing channel. Please wait ....");
 
         // Withdraw everything to address
         let address_str = &self.close_channel_address;
@@ -286,6 +430,11 @@ impl App for MyApp {
                         }
                     }
                 } else {
+                    let now = Instant::now();
+                    if now.duration_since(self.last_stability_check) >= Duration::from_secs(30) {
+                        self.stable_channel = Self::check_stability(&self.user, self.stable_channel.clone());
+                        self.last_stability_check = now;
+                    }
                     let balances = self.user.list_balances();
                     let onchain_balance = Bitcoin::from_sats(balances.total_onchain_balance_sats);
                     let lightning_balance = Bitcoin::from_sats(balances.total_lightning_balance_sats);
