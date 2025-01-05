@@ -6,8 +6,8 @@ edition = "2021"
 [dependencies]
 ldk-node = "0.4.2"
 lightning = { version = "0.0.125", features = ["std"] }
-eframe = "0.22"
-egui = "0.22"
+eframe = "0.24"
+egui = "0.24"
 hex = "0.4.3"
 qrcode = "0.14"
 image = "0.24"

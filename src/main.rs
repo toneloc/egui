@@ -393,7 +393,7 @@ impl App for MyApp {
                         }
                     } else if self.user_data.waiting_for_invoice_payment {
                         if let Some(ref qr) = self.qr_texture {
-                            ui.image(qr, qr.size_vec2());
+                            ui.image(qr);
                         } else {
                             ui.label("Big white box (placeholder)");
                         }
