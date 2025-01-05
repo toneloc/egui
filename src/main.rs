@@ -94,7 +94,7 @@ impl MyApp {
             channel_id: ChannelId::from_bytes(channel_id_bytes),
             is_stable_receiver: true,
             counterparty: lsp_pubkey,
-            expected_usd: USD::from_f64(0.0),
+            expected_usd: USD::from_f64(48.0),
             expected_btc: Bitcoin::from_btc(0.0),
             stable_receiver_btc: Bitcoin::from_btc(0.0),
             stable_provider_btc: Bitcoin::from_btc(0.0),
@@ -115,7 +115,7 @@ impl MyApp {
         );
 
         Self {
-            last_stability_check: Instant::now(),
+            last_stability_check: Instant::now() - Duration::from_secs(60),
             user_data: UserData::default(),
             invoice_result: String::new(),
             user,
@@ -131,7 +131,7 @@ impl MyApp {
     }
 
     /// Core stability logic
-    fn check_stability(node: &Node, mut sc: StableChannel) -> StableChannel {
+    fn check_stability(node: &Node, sc: &mut StableChannel) {
         sc.latest_price = fetch_prices(&Agent::new(), &set_price_feeds())
         .and_then(|prices| calculate_median_price(prices))
         .unwrap_or(0.0);
@@ -141,7 +141,7 @@ impl MyApp {
             .iter()
             .find(|c| c.channel_id == sc.channel_id)
         {
-            sc = Self::update_balances(sc, Some(channel.clone()));
+            Self::update_balances(sc, Some(channel.clone()));
         }
 
         let mut dollars_from_par: USD = sc.stable_receiver_usd - sc.expected_usd;
@@ -186,7 +186,7 @@ impl MyApp {
                     .iter()
                     .find(|c| c.channel_id == sc.channel_id)
                 {
-                    sc = Self::update_balances(sc, Some(channel.clone()));
+                    Self::update_balances(sc, Some(channel.clone()));
                 }
 
                 println!("{:<25} {:>15}", "Expected USD:", sc.expected_usd);
@@ -239,13 +239,10 @@ impl MyApp {
                 println!("Risk level high. Current risk level: {}", sc.risk_level);
             }
         }
-        sc
     }
     
-    fn update_balances(
-        mut sc: StableChannel,
-        channel_details: Option<ChannelDetails>,
-    ) -> StableChannel {
+    fn update_balances(sc: &mut StableChannel, channel_details: Option<ChannelDetails>) {
+
         let (our_balance, their_balance) = match channel_details {
             Some(channel) => {
                 let unspendable_punishment_sats = channel.unspendable_punishment_reserve.unwrap_or(0);
@@ -254,10 +251,9 @@ impl MyApp {
                 let their_balance_sats = channel.channel_value_sats - our_balance_sats;
                 (our_balance_sats, their_balance_sats)
             }
-            None => (0, 0), // Handle the case where channel_details is None
+            None => (0, 0),
         };
 
-        // Update balances based on whether this is a User or provider
         if sc.is_stable_receiver {
             sc.stable_receiver_btc = Bitcoin::from_sats(our_balance);
             sc.stable_receiver_usd = USD::from_bitcoin(sc.stable_receiver_btc, sc.latest_price);
@@ -269,8 +265,6 @@ impl MyApp {
             sc.stable_receiver_btc = Bitcoin::from_sats(their_balance);
             sc.stable_receiver_usd = USD::from_bitcoin(sc.stable_receiver_btc, sc.latest_price);
         }
-
-        sc // Return the modified StableChannel
     }
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
@@ -342,6 +336,7 @@ impl MyApp {
         } else {
             let mut info = String::new();
             info.push_str("User Channels:\n");
+            self.stable_channel.channel_id = channels[0].channel_id;
             for channel in channels.iter() {
                 info.push_str("--------------------------------------------\n");
                 info.push_str(&format!("Channel ID: {}\n", channel.channel_id));
@@ -355,7 +350,6 @@ impl MyApp {
     }
 
     fn close_channels_to_address(&mut self) {
-        // Close all channels
         for channel in self.user.list_channels().iter() {
             let user_channel_id = channel.user_channel_id;
             let counterparty_node_id = channel.counterparty_node_id;
@@ -421,20 +415,24 @@ impl App for MyApp {
                             if !self.channel_list.is_empty() {
                                 self.user_data.waiting_for_invoice_payment = false;
                                 self.user_data.is_onboarding = false;
+                                println!("{}", self.channel_list[0].channel_id);
+                                
                             }
                         }
                         ui.label(&self.channel_list_string);
 
                         if ui.button("Back").clicked() {
-                            self.user_data.waiting_for_invoice_payment = false;
+                            self.user_data.waiting_for_invoice_payment = true;
                         }
                     }
-                } else {
+                } else { // Regularly scheduled programming
                     let now = Instant::now();
                     if now.duration_since(self.last_stability_check) >= Duration::from_secs(30) {
-                        self.stable_channel = Self::check_stability(&self.user, self.stable_channel.clone());
+                        Self::check_stability(&self.user, &mut self.stable_channel);
                         self.last_stability_check = now;
                     }
+
+                    // Replace with data from stable channel struct
                     let balances = self.user.list_balances();
                     let onchain_balance = Bitcoin::from_sats(balances.total_onchain_balance_sats);
                     let lightning_balance = Bitcoin::from_sats(balances.total_lightning_balance_sats);
