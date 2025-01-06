@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ldk-node = "0.4.2"
-lightning = { version = "0.0.125", features = ["std"] }
+ldk-node = "=0.4.2"
+lightning = "=0.0.125"  # Pin to specific version
+lightning-liquidity = "=0.1.0-alpha.6"
 eframe = "0.24"
 egui = "0.24"
 hex = "0.4.3"
