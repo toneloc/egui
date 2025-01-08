@@ -4,7 +4,7 @@ mod types;
 mod price_feeds;
 
 use eframe::{egui, App, Frame};
-use egui::{TextureHandle, TextureOptions};
+use egui::{Frame as EguiFrame, Margin, Stroke, Color32, RichText, TextureHandle, TextureOptions};
 use ldk_node::{
     bitcoin::{secp256k1::PublicKey, Address, Network},
     lightning::{
@@ -22,7 +22,6 @@ use std::time::{Instant, Duration};
 
 use types::{Bitcoin, StableChannel, USD};
 use price_feeds::{calculate_median_price, fetch_prices, set_price_feeds};
-
 
 #[derive(Clone)]
 struct UserData {
@@ -56,6 +55,7 @@ struct MyApp {
     showing_channels: bool,
     close_channel_address: String,
     network: Network,
+    frame: EguiFrame,
 }
 
 fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
@@ -82,7 +82,7 @@ fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
 impl MyApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let bytes = hex::decode(
-            "03c5a9b32688c82cc1efa7c205390ef10444d8d6a412af91aa429f7bf34bb19c11",
+            "025d4c41316f9d847ed3ec827751f1df4efabb6aa48c162b29f9aabf5eb148f8b1",
         )
         .unwrap();
         let lsp_pubkey = PublicKey::from_slice(&bytes).ok().unwrap();
@@ -114,6 +114,20 @@ impl MyApp {
             stable_channel.channel_id.to_string()
         );
 
+        let frame = EguiFrame::none()
+            .inner_margin(egui::Margin::same(10.0))
+            .outer_margin(Margin::same(16.0))
+            .stroke(Stroke::new(3.0, Color32::BLACK))
+            .fill(egui::Color32::WHITE)
+            .rounding(10.0)
+            .shadow(egui::Shadow {
+                offset: egui::Vec2::new(0.0, 0.0),
+                blur: 30.0,
+                spread: 0.0,
+                color: Color32::from_rgba_unmultiplied(255, 255, 255, 80),
+        });
+
+
         Self {
             last_stability_check: Instant::now() - Duration::from_secs(60),
             user_data: UserData::default(),
@@ -127,6 +141,7 @@ impl MyApp {
             showing_channels: false,
             close_channel_address: String::new(),
             network: Network::Signet,
+            frame
         }
     }
 
@@ -269,7 +284,7 @@ impl MyApp {
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
         let _connected = self.user.connect(
-            PublicKey::from_str("024fa3625dbcf4511e5d0b28ec3cf590eb8bf31fc4d3a7dc3fa282a5ce4ecd6623")
+            PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
                 .unwrap(),
             SocketAddress::from_str("127.0.0.1:9735").unwrap(),
             true,
@@ -377,7 +392,12 @@ impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.heading("Stable Channels ⚖️💵⚡");
+                self.frame.show(ui, |ui| {
+                    ui.heading("Stable Channels ⚖️💵⚡");
+                    
+
+                let bigger_channel_button = egui::Button::new("Create a $100 stable channel")
+                        .min_size(egui::vec2(180.0, 50.0));
 
                 if self.user_data.is_onboarding {
                     self.list_channels();
@@ -387,28 +407,31 @@ impl App for MyApp {
                     }
 
                     if !self.user_data.waiting_for_invoice_payment && !self.user_data.has_paid_initial_invoice {
-                        if ui.button("create a $100 stable channel").clicked() {
+                        if ui.add(bigger_channel_button).clicked() {
                             self.get_jit_invoice(ctx);
                             self.user_data.waiting_for_invoice_payment = true;
                         }
+                        
+                
                     } else if self.user_data.waiting_for_invoice_payment {
                         if let Some(ref qr) = self.qr_texture {
                             ui.image(qr);
                         } else {
-                            ui.label("Big white box (placeholder)");
+                            ui.label("Lightning QR Missing");
                         }
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.invoice_result)
+                            egui::TextEdit::multiline(&mut self.invoice_result)
+                                .frame(true)
+                                .desired_width(400.0) // Optional: adjust the width as needed
+                                .desired_rows(3)
                                 .hint_text("Invoice..."),
+                        
                         );
                         if ui.button("Copy Invoice").clicked() {
                             ctx.output_mut(|o| {
                                 o.copied_text = self.invoice_result.clone();
                             });
                         }
-                        self.dot_counter = (self.dot_counter + 1) % 7;
-                        let dots = ".".repeat(self.dot_counter);
-                        ui.label(dots);
 
                         if ui.button("Check Channels").clicked() {
                             self.list_channels();
@@ -422,6 +445,8 @@ impl App for MyApp {
                         ui.label(&self.channel_list_string);
 
                         if ui.button("Back").clicked() {
+                            self.user_data.waiting_for_invoice_payment = false;
+                            self.user_data.is_onboarding = true;
                             self.user_data.waiting_for_invoice_payment = true;
                         }
                     }
@@ -452,7 +477,10 @@ impl App for MyApp {
                     if ui.button("Back").clicked() {
                         self.user_data.is_onboarding = true;
                     }
+
+                
                 }
+            });
             });
         });
     }
@@ -463,6 +491,6 @@ fn main() {
     eframe::run_native(
         "My App",
         native_options,
-        Box::new(|cc| Box::new(MyApp::new(cc))),
+        Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
     );
 }
