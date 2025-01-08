@@ -6,15 +6,14 @@ mod price_feeds;
 use eframe::{egui, App, Frame};
 use egui::{Frame as EguiFrame, Margin, Stroke, Color32, RichText, TextureHandle, TextureOptions};
 use ldk_node::{
-    bitcoin::{secp256k1::PublicKey, Address, Network},
-    lightning::{
+    bitcoin::{secp256k1::PublicKey, Address, Network}, lightning::{
         ln::{msgs::SocketAddress, types::ChannelId},
         offers::offer::Offer,
-    },
-    Builder, Node, ChannelDetails,
+    }, Builder, ChannelDetails, Node
 };
 use hex;
 use image::{GrayImage, Luma};
+use lightning::routing::gossip::NodeId;
 use qrcode::{Color, QrCode};
 use ureq::Agent;
 
@@ -76,6 +75,20 @@ fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
 
     let node = builder.build().unwrap();
     node.start().unwrap();
+
+    let listening_addresses: Vec<SocketAddress> = node.listening_addresses().unwrap();
+
+    if let Some(first_address) = listening_addresses.first() {
+        println!("");
+        println!("Actor Role: {}", alias);
+        println!("Public Key: {}", node.node_id());
+        println!("Internet Address: {}", first_address);
+        println!("");
+    } else {
+        println!("No listening addresses found.");
+    }
+
+
     node
 }
 
@@ -283,15 +296,46 @@ impl MyApp {
     }
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
-        let _connected = self.user.connect(
+        let _connected_to_lsp = self.user.connect(
+            PublicKey::from_str("025d4c41316f9d847ed3ec827751f1df4efabb6aa48c162b29f9aabf5eb148f8b1")
+                .unwrap(),
+            SocketAddress::from_str("127.0.0.1:9737").unwrap(),
+            true,
+        );
+
+        println!("Connection result: {:?}", _connected_to_lsp.unwrap());
+
+        let _connected_to_exchange = self.user.connect(
             PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
                 .unwrap(),
             SocketAddress::from_str("127.0.0.1:9735").unwrap(),
             true,
         );
 
+        println!("Connection result: {:?}", _connected_to_exchange.unwrap());
+
+        let node_info = self
+        .user
+        .network_graph()
+        .node(&NodeId::from_pubkey(
+            &PublicKey::from_str("025d4c41316f9d847ed3ec827751f1df4efabb6aa48c162b29f9aabf5eb148f8b1")
+                .unwrap(),
+        ));
+
+        println!("Node information: {:?}", node_info);
+
+        let node_info = self
+            .user
+            .network_graph()
+            .node(&NodeId::from_pubkey(
+                &PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
+                    .unwrap(),
+            ));
+
+        println!("Node information: {:?}", node_info);
+            
         let result = self.user.bolt11_payment().receive_via_jit_channel(
-            50_000_000,
+            30_000_000,
             "Stable Channel",
             3600,
             Some(10_000_000),
@@ -394,6 +438,8 @@ impl App for MyApp {
             ui.vertical_centered(|ui| {
                 self.frame.show(ui, |ui| {
                     ui.heading("Stable Channels ⚖️💵⚡");
+                    ui.add_space(80.0);
+
                     
 
                 let bigger_channel_button = egui::Button::new("Create a $100 stable channel")
@@ -407,6 +453,7 @@ impl App for MyApp {
                     }
 
                     if !self.user_data.waiting_for_invoice_payment && !self.user_data.has_paid_initial_invoice {
+                        
                         if ui.add(bigger_channel_button).clicked() {
                             self.get_jit_invoice(ctx);
                             self.user_data.waiting_for_invoice_payment = true;
@@ -478,18 +525,19 @@ impl App for MyApp {
                         self.user_data.is_onboarding = true;
                     }
 
-                
                 }
-            });
+
+                ui.add_space(180.0);
             });
         });
-    }
+    });
+}
 }
 
 fn main() {
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
-        "My App",
+        "Stable Channels",
         native_options,
         Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
     );
