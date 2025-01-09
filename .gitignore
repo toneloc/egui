@@ -1,8 +1,8 @@
 # Rust build directory
-/target/
+target/
 
 # Local data folder
-/data/
+data/
 
 # Generated documentation
 /doc/
