@@ -3,7 +3,7 @@ mod price_feeds;
 mod stable;
 
 use eframe::{egui, App, Frame};
-use egui::{load::SizedTexture, Color32, Frame as EguiFrame, Margin, Stroke, TextureHandle, TextureOptions};
+use egui::{Color32, Frame as EguiFrame, Margin, Stroke, TextureHandle, TextureOptions};
 use image::{GrayImage, Luma};
 use ldk_node::{
     bitcoin::{address, secp256k1::PublicKey, Address, Network}, lightning::{
@@ -13,22 +13,25 @@ use ldk_node::{
 };
 use hex;
 use qrcode::{Color, QrCode};
-use std::{str::FromStr, thread::sleep, time::{Duration, Instant}};
+use std::{str::FromStr, time::{Duration, Instant}};
 use types::{Bitcoin, StableChannel, USD};
+use ldk_node::Event;
+
 use crate::stable::{check_stability,list_channels, close_channels_to_address, connect_to_lsp_and_entry_node};
 
+enum AppState {
+    HomeScreen,
+    WaitingForPayment,
+    MainScreen,
+}
 struct MyApp {
-    is_onboarding: bool,
-    has_paid_initial_invoice: bool,
-    waiting_for_invoice_payment: bool,
-    public_key: u64,
+    state: AppState,
     last_stability_check: Instant,
     invoice_result: String,
     user: Node,
     qr_texture: Option<TextureHandle>,
     channel_list: Vec<ChannelDetails>,
     channel_list_string: String,
-    dot_counter: usize,
     stable_channel: StableChannel,
     showing_channels: bool,
     close_channel_address: String,
@@ -120,23 +123,75 @@ impl MyApp {
 
 
         Self {
-            is_onboarding: true,
-            has_paid_initial_invoice: false,
-            waiting_for_invoice_payment: false,
-            public_key: 0,
+            state: AppState::HomeScreen,
             last_stability_check: Instant::now() - Duration::from_secs(60),
             invoice_result: String::new(),
             user,
             qr_texture: None,
             channel_list: Vec::new(),
             channel_list_string: String::new(),
-            dot_counter: 0,
             stable_channel,
             showing_channels: false,
             close_channel_address: String::new(),
             network: Network::Signet,
             frame,
         }
+    }
+
+    fn check_stored_state(&mut self) {
+        
+    }
+
+    fn show_home_screen(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.heading("Stable Channels ⚖️💵⚡");
+                ui.add_space(80.0);
+
+                let create_channel_button = egui::Button::new("Create a $100 stable channel")
+                    .min_size(egui::vec2(180.0, 50.0));
+
+                if ui.add(create_channel_button).clicked() {
+                    connect_to_lsp_and_entry_node(&self.user);
+                    self.get_jit_invoice(ctx);
+                    self.state = AppState::WaitingForPayment;
+                }
+            });
+        });
+    }
+
+    fn show_waiting_for_payment_screen(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                if let Some(ref qr) = self.qr_texture {
+                    ui.image(qr);
+                } else {
+                    ui.label("Lightning QR Missing");
+                }
+
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.invoice_result)
+                        .frame(true)
+                        .desired_width(400.0)
+                        .desired_rows(3)
+                        .hint_text("Invoice..."),
+                );
+
+                if ui.button("Copy Invoice").clicked() {
+                    ctx.output_mut(|o| {
+                        o.copied_text = self.invoice_result.clone();
+                    });
+                }
+
+                if !self.channel_list.is_empty() {
+                    self.state = AppState::MainScreen;
+                }
+
+                if ui.button("Back").clicked() {
+                    self.state = AppState::HomeScreen;
+                }
+            });
+        });
     }
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
@@ -201,112 +256,61 @@ impl MyApp {
         }
     }
     
+    fn show_main_screen(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                let balances = self.user.list_balances();
+                let onchain_balance = Bitcoin::from_sats(balances.total_onchain_balance_sats);
+                let lightning_balance = Bitcoin::from_sats(balances.total_lightning_balance_sats);
+
+                ui.label(format!("On-Chain Balance: {}", onchain_balance));
+                ui.label(format!("Lightning Balance: {}", lightning_balance));
+
+                if ui.button("List Channels").clicked() {
+                    list_channels(&self.user);
+                }
+
+                ui.text_edit_singleline(&mut self.close_channel_address);
+                if ui.button("Close channel to address").clicked() {
+                    close_channels_to_address(&self.user, self.close_channel_address.clone());
+                }
+
+                if ui.button("Back").clicked() {
+                    self.state = AppState::HomeScreen;
+                }
+            });
+        });
+
+}
+
+    fn poll_for_events(&mut self) {
+        while let Some(event) = self.user.next_event() {
+            match event {
+                Event::ChannelReady { .. } => {
+                    self.state = AppState::MainScreen;
+                }
+                _ => {}
+            }
+            self.user.event_handled();
+        }
+    }
 }
 
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                self.frame.show(ui, |ui| {
-                    ui.heading("Stable Channels ⚖️💵⚡");
-                    ui.add_space(80.0);
-                
-                let bigger_channel_button = egui::Button::new("Create a $100 stable channel")
-                        .min_size(egui::vec2(180.0, 50.0));
-
-                if self.is_onboarding {
-                    list_channels(&mut self.user);
-                    if !self.channel_list.is_empty() {
-                        self.waiting_for_invoice_payment = false;
-                        self.is_onboarding = false;
-                    }
-
-                    if !self.waiting_for_invoice_payment && !self.has_paid_initial_invoice {
-                        if ui.add(bigger_channel_button).clicked() {
-                            connect_to_lsp_and_entry_node(&self.user);
-                            self.get_jit_invoice(ctx);
-                            self.waiting_for_invoice_payment = true;
-                    }
-                
-                    } else if self.waiting_for_invoice_payment {
-                        if let Some(ref qr) = self.qr_texture {
-                            ui.image(qr);
-                        } else {
-                            ui.label("Lightning QR Missing");
-                        }
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.invoice_result)
-                                .frame(true)
-                                .desired_width(400.0) // Optional: adjust the width as needed
-                                .desired_rows(3)
-                                .hint_text("Invoice..."),
-                        
-                        );
-                        if ui.button("Copy Invoice").clicked() {
-                            ctx.output_mut(|o| {
-                                o.copied_text = self.invoice_result.clone();
-                            });
-                        }
-
-                        let (channels, info) = list_channels(&self.user);
-                        self.channel_list = channels;
-                        self.channel_list_string = info;
-                                                
-                        if !self.channel_list.is_empty() {
-                            self.waiting_for_invoice_payment = false;
-                            self.is_onboarding = false;
-                            println!("{}", self.channel_list[0].channel_id);
-                            
-                        }
-                        
-                        ui.label(&self.channel_list_string);
-
-                        if ui.button("Back").clicked() {
-                            self.waiting_for_invoice_payment = false;
-                            self.is_onboarding = true;
-                            self.waiting_for_invoice_payment = true;
-                        }
-                    }
-                } else { // Regularly scheduled programming
-                    let now = Instant::now();
-                    if now.duration_since(self.last_stability_check) >= Duration::from_secs(30) {
-                        check_stability(&self.user, &mut self.stable_channel);
-                        self.last_stability_check = now;
-                    }
-
-                    // Replace with data from stable channel struct
-                    let balances = self.user.list_balances();
-                    let onchain_balance = Bitcoin::from_sats(balances.total_onchain_balance_sats);
-                    let lightning_balance = Bitcoin::from_sats(balances.total_lightning_balance_sats);
-                    ui.label(format!("On-Chain Balance: {}", onchain_balance));
-                    ui.label(format!("Lightning Balance: {}", lightning_balance));
-                    if ui.button("List Channels").clicked() {
-                        list_channels(&self.user);
-                    }
-                    ui.label(&self.channel_list_string);
-
-                    // Address entry + close channels button
-                    ui.text_edit_singleline(&mut self.close_channel_address);
-                    if ui.button("Close channel to address").clicked() {
-                        close_channels_to_address(&self.user, self.close_channel_address.clone());
-                    }
-
-                    if ui.button("Back").clicked() {
-                        self.is_onboarding = true;
-                    }
-
-                }
-
-                ui.add_space(180.0);
-            });
-        });
-    });
+        self.check_stored_state();
+        match self.state {
+            AppState::HomeScreen => self.show_home_screen(ctx),
+            AppState::WaitingForPayment => self.show_waiting_for_payment_screen(ctx),
+            AppState::MainScreen => self.show_main_screen(ctx),
+        }
+        self.poll_for_events();
+    }
 }
-}
-
+  
 fn main() {
     let native_options = eframe::NativeOptions::default();
-    eframe::run_native(
+    let _ = eframe::run_native(
         "Stable Channels",
         native_options,
         Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
