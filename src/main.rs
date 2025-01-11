@@ -2,7 +2,7 @@ mod types;
 mod price_feeds;
 mod stable;
 
-use eframe::{egui, App, Frame};
+use eframe::{egui, App, Error, Frame};
 use egui::{Color32, Frame as EguiFrame, Margin, Stroke, TextureHandle, TextureOptions};
 use image::{GrayImage, Luma};
 use ldk_node::{
@@ -13,6 +13,7 @@ use ldk_node::{
 };
 use hex;
 use qrcode::{Color, QrCode};
+use serde::{Deserialize, Serialize};
 use std::{str::FromStr, time::{Duration, Instant}};
 use types::{Bitcoin, StableChannel, USD};
 use ldk_node::Event;
@@ -24,6 +25,7 @@ enum AppState {
     WaitingForPayment,
     MainScreen,
 }
+
 struct MyApp {
     state: AppState,
     last_stability_check: Instant,
@@ -76,19 +78,26 @@ fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
 impl MyApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let bytes = hex::decode(
-            "025d4c41316f9d847ed3ec827751f1df4efabb6aa48c162b29f9aabf5eb148f8b1",
+            "03299e2ebafc734bf2759867c34ea4533e1c275ff1399bc6c4be099a18d625d7e3",
         )
         .unwrap();
         let lsp_pubkey = PublicKey::from_slice(&bytes).ok().unwrap();
         let user = make_node("user", 9736, Some(lsp_pubkey));
 
-        let channel_id_bytes: [u8; 32] = [0; 32];
+        let channel_id = if !user.list_channels().is_empty() {
+            user.list_channels()[0].channel_id
+        } else {
+            ChannelId::from_bytes([0; 32]) // set to zero to start
+        };
+
+        // you should store stable amt in a comment in a small payment
+        // check it is signed by stable provider!!!
 
         let mut stable_channel = StableChannel {
-            channel_id: ChannelId::from_bytes(channel_id_bytes),
+            channel_id,
             is_stable_receiver: true,
             counterparty: lsp_pubkey,
-            expected_usd: USD::from_f64(48.0),
+            expected_usd: USD::from_f64(28.0),
             expected_btc: Bitcoin::from_btc(0.0),
             stable_receiver_btc: Bitcoin::from_btc(0.0),
             stable_provider_btc: Bitcoin::from_btc(0.0),
@@ -121,9 +130,15 @@ impl MyApp {
                 color: Color32::from_rgba_unmultiplied(255, 255, 255, 80),
         });
 
+        // Determine the initial app state based on channel_id
+        let state = if channel_id != ChannelId::from_bytes([0; 32]) {
+            AppState::MainScreen
+        } else {
+            AppState::HomeScreen
+        };
 
         Self {
-            state: AppState::HomeScreen,
+            state,
             last_stability_check: Instant::now() - Duration::from_secs(60),
             invoice_result: String::new(),
             user,
@@ -138,7 +153,8 @@ impl MyApp {
         }
     }
 
-    fn check_stored_state(&mut self) {
+    fn check_state(&mut self) {
+        // Check if we already have a channel open
         
     }
 
@@ -152,7 +168,7 @@ impl MyApp {
                     .min_size(egui::vec2(180.0, 50.0));
 
                 if ui.add(create_channel_button).clicked() {
-                    connect_to_lsp_and_entry_node(&self.user);
+                    // connect_to_lsp_and_entry_node(&self.user);
                     self.get_jit_invoice(ctx);
                     self.state = AppState::WaitingForPayment;
                 }
@@ -195,12 +211,12 @@ impl MyApp {
     }
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
-        let _connected = self.user.connect(
-            PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
-                .unwrap(),
-            SocketAddress::from_str("127.0.0.1:9735").unwrap(),
-            true,
-        );
+        // let _connected = self.user.connect(
+        //     PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
+        //         .unwrap(),
+        //     SocketAddress::from_str("127.0.0.1:9735").unwrap(),
+        //     true,
+        // );
     
         let result = self.user.bolt11_payment().receive_via_jit_channel(
             30_000_000,
@@ -267,7 +283,8 @@ impl MyApp {
                 ui.label(format!("Lightning Balance: {}", lightning_balance));
 
                 if ui.button("List Channels").clicked() {
-                    list_channels(&self.user);
+                    let (_channels, info) = list_channels(&self.user);
+                    ui.label(info);
                 }
 
                 ui.text_edit_singleline(&mut self.close_channel_address);
@@ -298,12 +315,15 @@ impl MyApp {
 
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        self.check_stored_state();
+
+        self.check_state();
+
         match self.state {
             AppState::HomeScreen => self.show_home_screen(ctx),
             AppState::WaitingForPayment => self.show_waiting_for_payment_screen(ctx),
             AppState::MainScreen => self.show_main_screen(ctx),
         }
+
         self.poll_for_events();
     }
 }
