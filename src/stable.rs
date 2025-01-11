@@ -1,3 +1,4 @@
+use core::f64;
 use std::str::FromStr;
 
 use egui::{TextureHandle, TextureOptions};
@@ -15,9 +16,7 @@ use crate::price_feeds::{calculate_median_price, fetch_prices, set_price_feeds};
 
 /// Core stability logic
 pub fn check_stability(node: &Node, sc: &mut StableChannel) {
-    sc.latest_price = fetch_prices(&Agent::new(), &set_price_feeds())
-    .and_then(|prices| calculate_median_price(prices))
-    .unwrap_or(0.0);
+    sc.latest_price = get_latest_price();
 
     if let Some(channel) = node
         .list_channels()
@@ -61,8 +60,8 @@ pub fn check_stability(node: &Node, sc: &mut StableChannel) {
     match action {
         Action::DoNothing => println!("\nDifference from par less than 0.1%. Doing nothing."),
         Action::Wait => {
-            println!("\nWaiting 10 seconds and checking on payment...\n");
-            std::thread::sleep(std::time::Duration::from_secs(10));
+            // println!("\nWaiting 10 seconds and checking on payment...\n");
+            // std::thread::sleep(std::time::Duration::from_secs(10));
 
             if let Some(channel) = node
                 .list_channels()
@@ -122,6 +121,13 @@ pub fn check_stability(node: &Node, sc: &mut StableChannel) {
             println!("Risk level high. Current risk level: {}", sc.risk_level);
         }
     }
+}
+
+pub fn get_latest_price() -> f64 {
+    let latest_price = fetch_prices(&Agent::new(), &set_price_feeds())
+        .and_then(|prices| calculate_median_price(prices))
+        .unwrap_or(0.0);
+    latest_price
 }
 
 pub fn update_balances(sc: &mut StableChannel, channel_details: Option<ChannelDetails>) {

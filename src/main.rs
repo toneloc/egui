@@ -14,14 +14,15 @@ use ldk_node::{
 use hex;
 use qrcode::{Color, QrCode};
 use serde::{Deserialize, Serialize};
+use stable::get_latest_price;
 use std::{str::FromStr, time::{Duration, Instant}};
 use types::{Bitcoin, StableChannel, USD};
 use ldk_node::Event;
 
-use crate::stable::{check_stability,list_channels, close_channels_to_address, connect_to_lsp_and_entry_node};
+use crate::stable::{check_stability,list_channels, close_channels_to_address};
 
 enum AppState {
-    HomeScreen,
+    OnboardingScreen,
     WaitingForPayment,
     MainScreen,
 }
@@ -108,7 +109,7 @@ impl MyApp {
             formatted_datetime: "2021-06-01 12:00:00".to_string(),
             payment_made: false,
             sc_dir: "/path/to/sc_dir".to_string(),
-            latest_price: 0.0,
+            latest_price: get_latest_price(),
             prices: "".to_string(),
         };
 
@@ -134,7 +135,7 @@ impl MyApp {
         let state = if channel_id != ChannelId::from_bytes([0; 32]) {
             AppState::MainScreen
         } else {
-            AppState::HomeScreen
+            AppState::OnboardingScreen
         };
 
         Self {
@@ -158,7 +159,7 @@ impl MyApp {
         
     }
 
-    fn show_home_screen(&mut self, ctx: &egui::Context) {
+    fn show_onboarding_screen(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.heading("Stable Channels ⚖️💵⚡");
@@ -204,7 +205,7 @@ impl MyApp {
                 }
 
                 if ui.button("Back").clicked() {
-                    self.state = AppState::HomeScreen;
+                    self.state = AppState::MainScreen;
                 }
             });
         });
@@ -275,25 +276,31 @@ impl MyApp {
     fn show_main_screen(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
+                let now = Instant::now();
+                if now.duration_since(self.last_stability_check) >= Duration::from_secs(30) {
+                    check_stability(&self.user, &mut self.stable_channel);
+                    self.last_stability_check = now;
+                }
+
                 let balances = self.user.list_balances();
                 let onchain_balance = Bitcoin::from_sats(balances.total_onchain_balance_sats);
                 let lightning_balance = Bitcoin::from_sats(balances.total_lightning_balance_sats);
-
+                
                 ui.label(format!("On-Chain Balance: {}", onchain_balance));
                 ui.label(format!("Lightning Balance: {}", lightning_balance));
 
-                if ui.button("List Channels").clicked() {
-                    let (_channels, info) = list_channels(&self.user);
-                    ui.label(info);
-                }
+                // if ui.button("List Channels").clicked() {
+                //     let (_channels, info) = list_channels(&self.user);
+                //     ui.label(info);
+                // }
+                let latest_price_dollars = self.stable_channel.latest_price;
+                ui.label(format!("Latest Price (USD): ${:.2}", latest_price_dollars));
+
+                ui.add_space(50.0);
 
                 ui.text_edit_singleline(&mut self.close_channel_address);
                 if ui.button("Close channel to address").clicked() {
                     close_channels_to_address(&self.user, self.close_channel_address.clone());
-                }
-
-                if ui.button("Back").clicked() {
-                    self.state = AppState::HomeScreen;
                 }
             });
         });
@@ -319,7 +326,7 @@ impl App for MyApp {
         self.check_state();
 
         match self.state {
-            AppState::HomeScreen => self.show_home_screen(ctx),
+            AppState::OnboardingScreen => self.show_onboarding_screen(ctx),
             AppState::WaitingForPayment => self.show_waiting_for_payment_screen(ctx),
             AppState::MainScreen => self.show_main_screen(ctx),
         }
