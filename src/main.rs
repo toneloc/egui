@@ -3,7 +3,7 @@ mod price_feeds;
 mod stable;
 
 use eframe::{egui, App, Error, Frame};
-use egui::{Color32, Frame as EguiFrame, Margin, Stroke, TextureHandle, TextureOptions};
+use egui::{epaint, Color32, Frame as EguiFrame, Margin, Stroke, TextureHandle, TextureOptions, ViewportCommand};
 use image::{GrayImage, Luma};
 use ldk_node::{
     bitcoin::{address, secp256k1::PublicKey, Address, Network}, lightning::{
@@ -153,11 +153,7 @@ impl MyApp {
             frame,
         }
     }
-
-    fn check_state(&mut self) {
         // Check if we already have a channel open
-        
-    }
 
     fn show_onboarding_screen(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -274,38 +270,62 @@ impl MyApp {
     }
     
     fn show_main_screen(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                let now = Instant::now();
-                if now.duration_since(self.last_stability_check) >= Duration::from_secs(30) {
-                    check_stability(&self.user, &mut self.stable_channel);
-                    self.last_stability_check = now;
-                }
-
-                let balances = self.user.list_balances();
-                let onchain_balance = Bitcoin::from_sats(balances.total_onchain_balance_sats);
-                let lightning_balance = Bitcoin::from_sats(balances.total_lightning_balance_sats);
-                
-                ui.label(format!("On-Chain Balance: {}", onchain_balance));
-                ui.label(format!("Lightning Balance: {}", lightning_balance));
-
-                // if ui.button("List Channels").clicked() {
-                //     let (_channels, info) = list_channels(&self.user);
-                //     ui.label(info);
-                // }
-                let latest_price_dollars = self.stable_channel.latest_price;
-                ui.label(format!("Latest Price (USD): ${:.2}", latest_price_dollars));
-
-                ui.add_space(50.0);
-
-                ui.text_edit_singleline(&mut self.close_channel_address);
-                if ui.button("Close channel to address").clicked() {
-                    close_channels_to_address(&self.user, self.close_channel_address.clone());
-                }
+        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+            ui.centered_and_justified(|ui| {
+                ui.heading(
+                    egui::RichText::new("Stable Channels").size(28.0).strong(),
+                );
             });
         });
+    
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::Frame::none()
+                .inner_margin(epaint::Margin::symmetric(20.0, 0.0))
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        let balances = self.user.list_balances();
+                        let lightning_balance_btc = Bitcoin::from_sats(balances.total_lightning_balance_sats);
+                        let lightning_balance_usd =
+                            USD::from_bitcoin(lightning_balance_btc, self.stable_channel.latest_price);
+    
+                        ui.add_space(30.0);
+    
+                        ui.group(|ui| {
+                            ui.add(egui::Label::new(
+                                egui::RichText::new(lightning_balance_usd.to_string())
+                                    .size(36.0)
+                                    .strong(),
+                            ));
+        
+                            ui.label(format!("{} BTC", lightning_balance_btc));
+        
+                        });
 
-}
+                        ui.add_space(20.0);
+
+                        ui.group(|ui| {
+                            ui.heading("Bitcoin Price");
+                            ui.label(format!("${:.2}", self.stable_channel.latest_price));
+                        });
+
+                        ui.add_space(20.0);
+                        
+                        ui.heading("Close Channel");
+                        ui.label("Address to close channel to:");
+                        ui.text_edit_singleline(&mut self.close_channel_address);
+
+                        if ui.button("Close Channel").clicked() {
+                            close_channels_to_address(
+                                &self.user,
+                                self.close_channel_address.clone()
+                            );
+                        }
+    
+                        ui.add_space(20.0);
+                    });
+                });
+        });
+    }
 
     fn poll_for_events(&mut self) {
         while let Some(event) = self.user.next_event() {
@@ -318,12 +338,17 @@ impl MyApp {
             self.user.event_handled();
         }
     }
+
 }
 
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-
-        self.check_state();
+        let now = Instant::now();
+        
+        if now.duration_since(self.last_stability_check) >= Duration::from_secs(30) {
+            check_stability(&self.user, &mut self.stable_channel);
+            self.last_stability_check = now;
+        }
 
         match self.state {
             AppState::OnboardingScreen => self.show_onboarding_screen(ctx),
@@ -332,6 +357,7 @@ impl App for MyApp {
         }
 
         self.poll_for_events();
+        
     }
 }
   
