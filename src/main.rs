@@ -2,8 +2,8 @@ mod types;
 mod price_feeds;
 mod stable;
 
-use eframe::{egui, App, Error, Frame};
-use egui::{epaint, Color32, Frame as EguiFrame, Margin, Stroke, TextureHandle, TextureOptions, ViewportCommand};
+use eframe::{egui, App, Frame};
+use egui::{epaint,TextureHandle, TextureOptions};
 use image::{GrayImage, Luma};
 use ldk_node::{
     bitcoin::{address, secp256k1::PublicKey, Address, Network}, lightning::{
@@ -13,13 +13,12 @@ use ldk_node::{
 };
 use hex;
 use qrcode::{Color, QrCode};
-use serde::{Deserialize, Serialize};
 use stable::get_latest_price;
-use std::{str::FromStr, time::{Duration, Instant}};
+use std::time::{Duration, Instant};
 use types::{Bitcoin, StableChannel, USD};
 use ldk_node::Event;
 
-use crate::stable::{check_stability,list_channels, close_channels_to_address};
+use crate::stable::{check_stability,close_channels_to_address};
 
 enum AppState {
     OnboardingScreen,
@@ -34,12 +33,8 @@ struct MyApp {
     user: Node,
     qr_texture: Option<TextureHandle>,
     channel_list: Vec<ChannelDetails>,
-    channel_list_string: String,
     stable_channel: StableChannel,
-    showing_channels: bool,
     close_channel_address: String,
-    network: Network,
-    frame: EguiFrame,
 }
 
 fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
@@ -94,7 +89,7 @@ impl MyApp {
         // you should store stable amt in a comment in a small payment
         // check it is signed by stable provider!!!
 
-        let mut stable_channel = StableChannel {
+        let stable_channel = StableChannel {
             channel_id,
             is_stable_receiver: true,
             counterparty: lsp_pubkey,
@@ -118,19 +113,6 @@ impl MyApp {
             stable_channel.channel_id.to_string()
         );
 
-        let frame = EguiFrame::none()
-            .inner_margin(egui::Margin::same(10.0))
-            .outer_margin(Margin::same(16.0))
-            .stroke(Stroke::new(3.0, Color32::BLACK))
-            .fill(egui::Color32::WHITE)
-            .rounding(10.0)
-            .shadow(egui::Shadow {
-                offset: egui::Vec2::new(0.0, 0.0),
-                blur: 30.0,
-                spread: 0.0,
-                color: Color32::from_rgba_unmultiplied(255, 255, 255, 80),
-        });
-
         // Determine the initial app state based on channel_id
         let state = if channel_id != ChannelId::from_bytes([0; 32]) {
             AppState::MainScreen
@@ -145,12 +127,8 @@ impl MyApp {
             user,
             qr_texture: None,
             channel_list: Vec::new(),
-            channel_list_string: String::new(),
             stable_channel,
-            showing_channels: false,
             close_channel_address: String::new(),
-            network: Network::Signet,
-            frame,
         }
     }
         // Check if we already have a channel open
@@ -331,6 +309,20 @@ impl MyApp {
         while let Some(event) = self.user.next_event() {
             match event {
                 Event::ChannelReady { .. } => {
+                    self.state = AppState::MainScreen;
+                }
+                
+                // update UI balances
+                Event::PaymentReceived { .. } => {
+                    self.state = AppState::MainScreen;
+                }
+
+                // update UI balances
+                Event::PaymentReceived { .. } => {
+                    self.state = AppState::MainScreen;
+                }
+
+                Event::PaymentReceived { .. } => {
                     self.state = AppState::MainScreen;
                 }
                 _ => {}

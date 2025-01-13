@@ -1,15 +1,11 @@
 use core::f64;
 use std::str::FromStr;
 
-use egui::{TextureHandle, TextureOptions};
-use image::{GrayImage, Luma};
-use ldk_node::bitcoin::secp256k1::PublicKey;
+// use ldk_node::bitcoin::secp256k1::PublicKey;
 use ldk_node::bitcoin::{Address, Network};
 use ldk_node::{Node, ChannelDetails};
-use lightning::ln::msgs::SocketAddress;
-use lightning::ln::types::ChannelId;
-use lightning::routing::gossip::NodeId;
-use qrcode::{Color, QrCode};
+// use lightning::ln::msgs::SocketAddress;
+// use lightning::routing::gossip::NodeId;
 use ureq::Agent;
 use crate::types::{Bitcoin, StableChannel, USD};
 use crate::price_feeds::{calculate_median_price, fetch_prices, set_price_feeds};
@@ -156,63 +152,63 @@ pub fn update_balances(sc: &mut StableChannel, channel_details: Option<ChannelDe
     }
 }
 
-pub fn connect_to_lsp_and_entry_node(node: &Node) {
-    let _connected_to_lsp = node.connect(
-        PublicKey::from_str("025d4c41316f9d847ed3ec827751f1df4efabb6aa48c162b29f9aabf5eb148f8b1")
-            .unwrap(),
-        SocketAddress::from_str("127.0.0.1:9737").unwrap(),
-        true,
-    );
+// pub fn connect_to_lsp_and_entry_node(node: &Node) {
+//     let _connected_to_lsp = node.connect(
+//         PublicKey::from_str("025d4c41316f9d847ed3ec827751f1df4efabb6aa48c162b29f9aabf5eb148f8b1")
+//             .unwrap(),
+//         SocketAddress::from_str("127.0.0.1:9737").unwrap(),
+//         true,
+//     );
 
-    println!("Connection result: {:?}", _connected_to_lsp.unwrap());
+//     println!("Connection result: {:?}", _connected_to_lsp.unwrap());
 
-    let _connected_to_exchange = node.connect(
-        PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
-            .unwrap(),
-        SocketAddress::from_str("127.0.0.1:9735").unwrap(),
-        true,
-    );
+//     let _connected_to_exchange = node.connect(
+//         PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
+//             .unwrap(),
+//         SocketAddress::from_str("127.0.0.1:9735").unwrap(),
+//         true,
+//     );
 
-    println!("Connection result: {:?}", _connected_to_exchange.unwrap());
+//     println!("Connection result: {:?}", _connected_to_exchange.unwrap());
 
-    let node_info = node
-        .network_graph()
-        .node(&NodeId::from_pubkey(
-            &PublicKey::from_str("025d4c41316f9d847ed3ec827751f1df4efabb6aa48c162b29f9aabf5eb148f8b1")
-                .unwrap(),
-        ));
+//     let node_info = node
+//         .network_graph()
+//         .node(&NodeId::from_pubkey(
+//             &PublicKey::from_str("025d4c41316f9d847ed3ec827751f1df4efabb6aa48c162b29f9aabf5eb148f8b1")
+//                 .unwrap(),
+//         ));
 
-    println!("Node information: {:?}", node_info);
+//     println!("Node information: {:?}", node_info);
 
-    let node_info = node
-        .network_graph()
-        .node(&NodeId::from_pubkey(
-            &PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
-                .unwrap(),
-        ));
+//     let node_info = node
+//         .network_graph()
+//         .node(&NodeId::from_pubkey(
+//             &PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
+//                 .unwrap(),
+//         ));
 
-    println!("Node information: {:?}", node_info);
-}
+//     println!("Node information: {:?}", node_info);
+// }
 
-pub fn list_channels(node: &Node) -> (Vec<ChannelDetails>, String) {
-    let channels = node.list_channels();
-    let mut info = String::new();
+// pub fn list_channels(node: &Node) -> (Vec<ChannelDetails>, String) {
+//     let channels = node.list_channels();
+//     let mut info = String::new();
 
-    if channels.is_empty() {
-        info.push_str("No channels found.");
-    } else {
-        info.push_str("User Channels:\n");
-        for channel in &channels {
-            info.push_str("--------------------------------------------\n");
-            info.push_str(&format!("Channel ID: {}\n", channel.channel_id));
-            info.push_str(&format!("Channel Value: {} sats\n", channel.channel_value_sats));
-            info.push_str(&format!("Channel Ready?: {}\n", channel.is_channel_ready));
-        }
-        info.push_str("--------------------------------------------\n");
-    }
+//     if channels.is_empty() {
+//         info.push_str("No channels found.");
+//     } else {
+//         info.push_str("User Channels:\n");
+//         for channel in &channels {
+//             info.push_str("--------------------------------------------\n");
+//             info.push_str(&format!("Channel ID: {}\n", channel.channel_id));
+//             info.push_str(&format!("Channel Value: {} sats\n", channel.channel_value_sats));
+//             info.push_str(&format!("Channel Ready?: {}\n", channel.is_channel_ready));
+//         }
+//         info.push_str("--------------------------------------------\n");
+//     }
 
-    (channels, info)
-}
+//     (channels, info)
+// }
 
 pub fn close_channels_to_address(node: &Node, address_str: String) {
     for channel in node.list_channels().iter() {
