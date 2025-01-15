@@ -24,6 +24,7 @@ enum AppState {
     OnboardingScreen,
     WaitingForPayment,
     MainScreen,
+    ClosingScreen
 }
 
 struct MyApp {
@@ -35,6 +36,7 @@ struct MyApp {
     channel_list: Vec<ChannelDetails>,
     stable_channel: StableChannel,
     close_channel_address: String,
+    status_message: String,
 }
 
 fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
@@ -49,7 +51,13 @@ fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
     }
     builder.set_network(Network::Signet);
     builder.set_chain_source_esplora("https://mutinynet.com/api/".to_string(), None);
-    builder.set_storage_dir_path(format!("./data/{alias}"));
+    
+    
+    let mut dir = dirs::home_dir().unwrap();
+    dir.push("sc-data");
+    dir.push(alias);
+    builder.set_storage_dir_path(dir.to_string_lossy().to_string());
+    
     let _ = builder.set_listening_addresses(vec![format!("127.0.0.1:{port}").parse().unwrap()]);
     let _ = builder.set_node_alias("some_alias".to_string());
 
@@ -129,6 +137,7 @@ impl MyApp {
             channel_list: Vec::new(),
             stable_channel,
             close_channel_address: String::new(),
+            status_message: String::new(),
         }
     }
         // Check if we already have a channel open
@@ -136,11 +145,19 @@ impl MyApp {
     fn show_onboarding_screen(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.heading("Stable Channels ⚖️💵⚡");
-                ui.add_space(80.0);
+                ui.heading(
+                    egui::RichText::new("Stable Channels v0.2").size(28.0).strong(),
+                );
+                ui.add_space(150.0);
 
-                let create_channel_button = egui::Button::new("Create a $100 stable channel")
-                    .min_size(egui::vec2(180.0, 50.0));
+                let create_channel_button = egui::Button::new(
+                    egui::RichText::new("Create Stable Channel")
+                        .color(egui::Color32::BLACK)
+                        .size(18.0),
+                        )
+                        .min_size(egui::vec2(200.0, 55.0))
+                        .fill(egui::Color32::from_gray(220))
+                        .rounding(8.0); // Subtle rounded corners
 
                 if ui.add(create_channel_button).clicked() {
                     // connect_to_lsp_and_entry_node(&self.user);
@@ -153,12 +170,17 @@ impl MyApp {
 
     fn show_waiting_for_payment_screen(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.add_space(15.0);
+
             ui.vertical_centered(|ui| {
                 if let Some(ref qr) = self.qr_texture {
                     ui.image(qr);
                 } else {
                     ui.label("Lightning QR Missing");
                 }
+
+                ui.add_space(15.0);
+
 
                 ui.add(
                     egui::TextEdit::multiline(&mut self.invoice_result)
@@ -168,19 +190,39 @@ impl MyApp {
                         .hint_text("Invoice..."),
                 );
 
-                if ui.button("Copy Invoice").clicked() {
+                ui.add_space(15.0);
+
+                if ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("Copy Invoice")
+                            .color(egui::Color32::BLACK)
+                            .size(16.0), 
+                    )
+                    .min_size(egui::vec2(150.0, 45.0)) // Smaller button size
+                    .fill(egui::Color32::from_gray(220))
+                    .rounding(6.0),
+                ).clicked() {
                     ctx.output_mut(|o| {
                         o.copied_text = self.invoice_result.clone();
                     });
                 }
-
-                if !self.channel_list.is_empty() {
-                    self.state = AppState::MainScreen;
+                
+                ui.add_space(10.0); 
+                
+                if ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("Back")
+                            .color(egui::Color32::BLACK)
+                            .size(16.0), // Slightly smaller text
+                    )
+                    .min_size(egui::vec2(150.0, 45.0)) // Smaller button size
+                    .fill(egui::Color32::from_gray(220))
+                    .rounding(6.0), // Slightly smaller rounded corners
+                ).clicked() {
+                    self.state = AppState::OnboardingScreen;
                 }
-
-                if ui.button("Back").clicked() {
-                    self.state = AppState::MainScreen;
-                }
+                
+                ui.add_space(10.0); // Add spacing after the buttons
             });
         });
     }
@@ -289,10 +331,15 @@ impl MyApp {
                         ui.add_space(20.0);
                         
                         ui.heading("Close Channel");
-                        ui.label("Address to close channel to:");
+                        ui.label("Address to withdrawl all funds (minus transaction fees):");
                         ui.text_edit_singleline(&mut self.close_channel_address);
 
                         if ui.button("Close Channel").clicked() {
+                            self.status_message = format!(
+                                "Your Stable Channel is closing and withdrawal transaction to {} is processing.",
+                                self.close_channel_address
+                            );
+
                             close_channels_to_address(
                                 &self.user,
                                 self.close_channel_address.clone()
@@ -300,8 +347,24 @@ impl MyApp {
                         }
     
                         ui.add_space(20.0);
+
+                        if !self.status_message.is_empty() {
+                            ui.label(self.status_message.clone());
+                        }
                     });
                 });
+        });
+
+    }
+
+    fn show_closing_screen(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+            ui.centered_and_justified(|ui| {
+                ui.heading(
+                    egui::RichText::new("Your channel is closing.").size(28.0).strong(),
+                );
+                ui.add_space(20.0);
+            });
         });
     }
 
@@ -315,17 +378,20 @@ impl MyApp {
                 // update UI balances
                 Event::PaymentReceived { .. } => {
                     self.state = AppState::MainScreen;
+                    println!("payment received");
                 }
 
                 // update UI balances
-                Event::PaymentReceived { .. } => {
-                    self.state = AppState::MainScreen;
-                }
+                Event::ChannelClosed { .. } => {
+                    self.state = AppState::ClosingScreen;
+                    println!("channel closed");
 
-                Event::PaymentReceived { .. } => {
-                    self.state = AppState::MainScreen;
+
                 }
-                _ => {}
+                // Wildcard
+                _ => {
+                
+                }
             }
             self.user.event_handled();
         }
@@ -346,6 +412,7 @@ impl App for MyApp {
             AppState::OnboardingScreen => self.show_onboarding_screen(ctx),
             AppState::WaitingForPayment => self.show_waiting_for_payment_screen(ctx),
             AppState::MainScreen => self.show_main_screen(ctx),
+            AppState::ClosingScreen => self.show_closing_screen(ctx),
         }
 
         self.poll_for_events();
@@ -354,10 +421,16 @@ impl App for MyApp {
 }
   
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("Application panicked: {}", info);
+    }));
+    
+    println!("Starting the app...");
     let native_options = eframe::NativeOptions::default();
     let _ = eframe::run_native(
         "Stable Channels",
         native_options,
         Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
     );
+    println!("App has exited.");
 }
