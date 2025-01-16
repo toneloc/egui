@@ -303,6 +303,9 @@ impl MyApp {
     
                         ui.group(|ui| {
                             ui.add_space(20.0);
+                        
+                            ui.heading("Your Balance");
+
                             ui.add(egui::Label::new(
                                 egui::RichText::new(lightning_balance_usd.to_string())
                                     .size(36.0)
@@ -323,39 +326,43 @@ impl MyApp {
                             ui.add_space(20.0);
                         });
 
-                        ui.add_space(50.0);
+                        ui.add_space(70.0);
                         
-                        ui.label("Withdrawal address (minus transaction fees):");
+                        // Close channel
+                        ui.collapsing("Close Channel", |ui| {
+                            ui.label("Withdrawal address (minus transaction fees):");
                         
-                        ui.add_space(10.0);
-                        ui.text_edit_singleline(&mut self.close_channel_address);
-                        ui.add_space(10.0);
-                        if ui.add(
-                            egui::Button::new(
-                                egui::RichText::new("Close Channel")
-                                    .color(egui::Color32::BLACK)
-                                    .size(16.0), 
+                            ui.add_space(10.0);
+                            ui.text_edit_singleline(&mut self.close_channel_address);
+                            ui.add_space(10.0);
+                        
+                            if ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new("Close Channel")
+                                        .color(egui::Color32::BLACK)
+                                        .size(16.0),
+                                )
+                                .min_size(egui::vec2(150.0, 45.0))
+                                .fill(egui::Color32::from_gray(220))
+                                .rounding(6.0),
                             )
-                            .min_size(egui::vec2(150.0, 45.0)) 
-                            .fill(egui::Color32::from_gray(220))
-                            .rounding(6.0),)
-                            .clicked() {
+                            .clicked()
+                            {
                                 self.status_message = format!(
                                     "Your Stable Channel is closing and withdrawal transaction to {} is processing.",
                                     self.close_channel_address
                                 );
-
-                            close_channels_to_address(
-                                &self.user,
-                                self.close_channel_address.clone()
-                            );
-                        }
-    
-                        ui.add_space(20.0);
-
-                        if !self.status_message.is_empty() {
-                            ui.label(self.status_message.clone());
-                        }
+                        
+                                close_channels_to_address(&self.user, self.close_channel_address.clone());
+                            }
+                        
+                            ui.add_space(20.0);
+                        
+                            if !self.status_message.is_empty() {
+                                ui.label(self.status_message.clone());
+                            }
+                        });
+                        
                     });
                 });
         });
