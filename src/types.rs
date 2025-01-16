@@ -42,10 +42,10 @@ impl std::fmt::Display for Bitcoin {
         let with_spaces = formatted_btc
             .chars()
             .enumerate()
-            .map(|(i, c)| if i == 4 || i == 7 { format!(" {}", c) } else { c.to_string() })
+            .map(|(i, c)| if i == 4 || i == 7 { format!("  {}", c) } else { c.to_string() })
             .collect::<String>();
 
-        write!(f, "{}btc", with_spaces)
+        write!(f, "{} btc", with_spaces)
     }
 }
 

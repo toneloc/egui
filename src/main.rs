@@ -213,16 +213,16 @@ impl MyApp {
                     egui::Button::new(
                         egui::RichText::new("Back")
                             .color(egui::Color32::BLACK)
-                            .size(16.0), // Slightly smaller text
+                            .size(16.0), 
                     )
-                    .min_size(egui::vec2(150.0, 45.0)) // Smaller button size
+                    .min_size(egui::vec2(150.0, 45.0)) 
                     .fill(egui::Color32::from_gray(220))
-                    .rounding(6.0), // Slightly smaller rounded corners
+                    .rounding(6.0), 
                 ).clicked() {
                     self.state = AppState::OnboardingScreen;
                 }
                 
-                ui.add_space(10.0); // Add spacing after the buttons
+                ui.add_space(10.0); 
             });
         });
     }
@@ -234,7 +234,6 @@ impl MyApp {
         //     SocketAddress::from_str("127.0.0.1:9735").unwrap(),
         //     true,
         // );
-    
         let result = self.user.bolt11_payment().receive_via_jit_channel(
             30_000_000,
             "Stable Channel",
@@ -289,15 +288,7 @@ impl MyApp {
         }
     }
     
-    fn show_main_screen(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            ui.centered_and_justified(|ui| {
-                ui.heading(
-                    egui::RichText::new("Stable Channels").size(28.0).strong(),
-                );
-            });
-        });
-    
+    fn show_main_screen(&mut self, ctx: &egui::Context) {    
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::Frame::none()
                 .inner_margin(epaint::Margin::symmetric(20.0, 0.0))
@@ -311,34 +302,48 @@ impl MyApp {
                         ui.add_space(30.0);
     
                         ui.group(|ui| {
+                            ui.add_space(20.0);
                             ui.add(egui::Label::new(
                                 egui::RichText::new(lightning_balance_usd.to_string())
                                     .size(36.0)
                                     .strong(),
                             ));
         
-                            ui.label(format!("{} BTC", lightning_balance_btc));
-        
+                            ui.label(format!("{}", lightning_balance_btc.to_string()));
+    
+                            ui.add_space(20.0);
                         });
 
                         ui.add_space(20.0);
 
                         ui.group(|ui| {
+                            ui.add_space(20.0);
                             ui.heading("Bitcoin Price");
                             ui.label(format!("${:.2}", self.stable_channel.latest_price));
+                            ui.add_space(20.0);
                         });
 
-                        ui.add_space(20.0);
+                        ui.add_space(50.0);
                         
-                        ui.heading("Close Channel");
-                        ui.label("Address to withdrawl all funds (minus transaction fees):");
+                        ui.label("Withdrawal address (minus transaction fees):");
+                        
+                        ui.add_space(10.0);
                         ui.text_edit_singleline(&mut self.close_channel_address);
-
-                        if ui.button("Close Channel").clicked() {
-                            self.status_message = format!(
-                                "Your Stable Channel is closing and withdrawal transaction to {} is processing.",
-                                self.close_channel_address
-                            );
+                        ui.add_space(10.0);
+                        if ui.add(
+                            egui::Button::new(
+                                egui::RichText::new("Close Channel")
+                                    .color(egui::Color32::BLACK)
+                                    .size(16.0), 
+                            )
+                            .min_size(egui::vec2(150.0, 45.0)) 
+                            .fill(egui::Color32::from_gray(220))
+                            .rounding(6.0),)
+                            .clicked() {
+                                self.status_message = format!(
+                                    "Your Stable Channel is closing and withdrawal transaction to {} is processing.",
+                                    self.close_channel_address
+                                );
 
                             close_channels_to_address(
                                 &self.user,
@@ -359,9 +364,9 @@ impl MyApp {
 
     fn show_closing_screen(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            ui.centered_and_justified(|ui| {
+            ui.horizontal_centered(|ui| {
                 ui.heading(
-                    egui::RichText::new("Your channel is closing.").size(28.0).strong(),
+                    egui::RichText::new(format!("Your withdrawal transaction to {} is processing", self.close_channel_address)).size(28.0).strong(),
                 );
                 ui.add_space(20.0);
             });
