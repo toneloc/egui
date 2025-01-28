@@ -1,0 +1,15 @@
+[lsp]
+pubkey = "02cb62fff1d95abe0dc142c29f560b5778f9435e4894a8a96f68c5d65b326df616"
+address = "127.0.0.1:9737"
+auth = "00000000000000000000000000000000"
+
+[node]
+network = "signet"
+chain_source_url = "https://mutinynet.com/api/"
+data_dir = ".data"
+alias = "user"
+port = 9736
+
+[stable_channel_defaults]
+expected_usd = 19.0
+sc_dir = ".data"

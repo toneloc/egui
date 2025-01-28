@@ -1,24 +1,24 @@
+mod config;
+mod stable;
 mod types;
 mod price_feeds;
-mod stable;
 
 use eframe::{egui, App, Frame};
-use egui::{epaint,TextureHandle, TextureOptions};
+use egui::{epaint::{self, Margin}, TextureHandle, TextureOptions};
 use image::{GrayImage, Luma};
 use ldk_node::{
-    bitcoin::{address, secp256k1::PublicKey, Address, Network}, lightning::{
-        ln::{msgs::SocketAddress, types::ChannelId},
-        offers::offer::Offer,
-    }, Builder, ChannelDetails, Node
+    bitcoin::{address, secp256k1::PublicKey, Address, Network},
+    lightning::{ln::{msgs::SocketAddress, types::ChannelId}, offers::offer::Offer},
+    Builder, ChannelDetails, Node, Event,
 };
-use hex;
+use lightning::routing::gossip::NodeId;
 use qrcode::{Color, QrCode};
-use stable::get_latest_price;
-use std::time::{Duration, Instant};
-use types::{Bitcoin, StableChannel, USD};
-use ldk_node::Event;
+use std::{str::FromStr, time::{Duration, Instant}};
+use dirs_next as dirs;
 
-use crate::stable::{check_stability,close_channels_to_address};
+use crate::config::Config;
+use crate::stable::{check_stability, close_channels_to_address, get_latest_price};
+use crate::types::{Bitcoin, StableChannel, USD};
 
 enum AppState {
     OnboardingScreen,
@@ -37,71 +37,77 @@ struct MyApp {
     stable_channel: StableChannel,
     close_channel_address: String,
     status_message: String,
+    config: Config,  // store our loaded config
 }
 
-fn make_node(alias: &str, port: u16, lsp_pubkey: Option<PublicKey>) -> Node {
+fn make_node(config: &Config, lsp_pubkey: Option<PublicKey>) -> Node {
     let mut builder = Builder::new();
+
+    // Use values from config rather than hardcoding
     if let Some(lsp_pubkey) = lsp_pubkey {
-        let address = "127.0.0.1:9737".parse().unwrap();
+        let address = config.lsp.address.parse().unwrap();
         builder.set_liquidity_source_lsps2(
             address,
             lsp_pubkey,
-            Some("00000000000000000000000000000000".to_owned()),
+            Some(config.lsp.auth.clone()),
         );
     }
-    builder.set_network(Network::Signet);
-    builder.set_chain_source_esplora("https://mutinynet.com/api/".to_string(), None);
-    
-    
+
+    let network = match config.node.network.to_lowercase().as_str() {
+        "signet" => Network::Signet,
+        "testnet" => Network::Testnet,
+        "bitcoin" => Network::Bitcoin,
+        // fallback
+        _ => Network::Signet,
+    };
+
+    builder.set_network(network);
+    builder.set_chain_source_esplora(config.node.chain_source_url.clone(), None);
+
     let mut dir = dirs::home_dir().unwrap();
-    dir.push("sc-data");
-    dir.push(alias);
+    dir.push(&config.node.data_dir);
+    dir.push(&config.node.alias);
     builder.set_storage_dir_path(dir.to_string_lossy().to_string());
-    
-    let _ = builder.set_listening_addresses(vec![format!("127.0.0.1:{port}").parse().unwrap()]);
-    let _ = builder.set_node_alias("some_alias".to_string());
+
+    builder
+        .set_listening_addresses(vec![format!("127.0.0.1:{}", config.node.port)
+        .parse()
+        .unwrap()])
+        .unwrap();
+
+    builder.set_node_alias(config.node.alias.clone());
 
     let node = builder.build().unwrap();
     node.start().unwrap();
 
-    let listening_addresses: Vec<SocketAddress> = node.listening_addresses().unwrap();
-
-    if let Some(first_address) = listening_addresses.first() {
-        println!("");
-        println!("Actor Role: {}", alias);
+    if let Some(first_address) = node.listening_addresses().unwrap().first() {
+        println!("\nActor Role: {}", config.node.alias);
         println!("Public Key: {}", node.node_id());
-        println!("Internet Address: {}", first_address);
-        println!("");
+        println!("Internet Address: {}\n", first_address);
     } else {
         println!("No listening addresses found.");
     }
-
     node
 }
 
 impl MyApp {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let bytes = hex::decode(
-            "03299e2ebafc734bf2759867c34ea4533e1c275ff1399bc6c4be099a18d625d7e3",
-        )
-        .unwrap();
-        let lsp_pubkey = PublicKey::from_slice(&bytes).ok().unwrap();
-        let user = make_node("user", 9736, Some(lsp_pubkey));
+    fn new(_cc: &eframe::CreationContext<'_>, config: Config) -> Self {
+        let lsp_pubkey_bytes = hex::decode(&config.lsp.pubkey).unwrap();
+        let lsp_pubkey = PublicKey::from_slice(&lsp_pubkey_bytes).unwrap();
+        println!("{}", lsp_pubkey);
 
+        let user = make_node(&config, Some(lsp_pubkey));
         let channel_id = if !user.list_channels().is_empty() {
             user.list_channels()[0].channel_id
         } else {
-            ChannelId::from_bytes([0; 32]) // set to zero to start
+            ChannelId::from_bytes([0; 32])
         };
-
-        // you should store stable amt in a comment in a small payment
-        // check it is signed by stable provider!!!
 
         let stable_channel = StableChannel {
             channel_id,
             is_stable_receiver: true,
             counterparty: lsp_pubkey,
-            expected_usd: USD::from_f64(28.0),
+            expected_usd: USD::from_f64(config.stable_channel_defaults.expected_usd),
             expected_btc: Bitcoin::from_btc(0.0),
             stable_receiver_btc: Bitcoin::from_btc(0.0),
             stable_provider_btc: Bitcoin::from_btc(0.0),
@@ -111,17 +117,13 @@ impl MyApp {
             timestamp: 0,
             formatted_datetime: "2021-06-01 12:00:00".to_string(),
             payment_made: false,
-            sc_dir: "/path/to/sc_dir".to_string(),
+            sc_dir: config.stable_channel_defaults.sc_dir.clone(),
             latest_price: get_latest_price(),
             prices: "".to_string(),
         };
+        println!("Stable Channel created: {:?}", stable_channel.channel_id.to_string());
 
-        println!(
-            "Stable Channel created: {:?}",
-            stable_channel.channel_id.to_string()
-        );
-
-        // Determine the initial app state based on channel_id
+        // Initialize the app state
         let state = if channel_id != ChannelId::from_bytes([0; 32]) {
             AppState::MainScreen
         } else {
@@ -138,29 +140,70 @@ impl MyApp {
             stable_channel,
             close_channel_address: String::new(),
             status_message: String::new(),
+            config,
         }
     }
-        // Check if we already have a channel open
 
     fn show_onboarding_screen(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.heading(
-                    egui::RichText::new("Stable Channels v0.2").size(28.0).strong(),
+                    egui::RichText::new("Stable Channels v0.2")
+                        .size(28.0)
+                        .strong()
+                        .color(egui::Color32::WHITE),
                 );
-                ui.add_space(150.0);
-
+                ui.add_space(50.0);
+    
+                // Step 1
+                ui.heading(
+                    egui::RichText::new("Step 1: Get a Lightning invoice ⚡")
+                        .color(egui::Color32::WHITE),
+                );
+                ui.label(
+                    egui::RichText::new(r#"Press the "Stabilize" button below."#)
+                        .color(egui::Color32::GRAY),
+                );
+    
+                ui.add_space(20.0);
+    
+                // Step 2
+                ui.heading(
+                    egui::RichText::new("Step 2: Send yourself bitcoin 💸")
+                        .color(egui::Color32::WHITE),
+                );
+                ui.label(
+                    egui::RichText::new("From a Lightning app or an exchange.")
+                        .color(egui::Color32::GRAY),
+                );
+    
+                ui.add_space(20.0);
+    
+                // Step 3
+                ui.heading(
+                    egui::RichText::new("Step 3: Stable channel created 🔧")
+                        .color(egui::Color32::WHITE),
+                );
+                ui.label(
+                    egui::RichText::new("Self-custody. Your keys, your coins.")
+                        .color(egui::Color32::GRAY),
+                );
+    
+                ui.add_space(50.0);
+    
+                // Create channel button
+                let subtle_orange = egui::Color32::from_rgba_premultiplied(247, 147, 26, 200); 
                 let create_channel_button = egui::Button::new(
-                    egui::RichText::new("Create Stable Channel")
-                        .color(egui::Color32::BLACK)
+                    egui::RichText::new("Stabilize")
+                        .color(egui::Color32::WHITE)
+                        .strong()
                         .size(18.0),
-                        )
-                        .min_size(egui::vec2(200.0, 55.0))
-                        .fill(egui::Color32::from_gray(220))
-                        .rounding(8.0); // Subtle rounded corners
-
+                )
+                .min_size(egui::vec2(200.0, 55.0))
+                .fill(subtle_orange)
+                .rounding(8.0);
+    
                 if ui.add(create_channel_button).clicked() {
-                    // connect_to_lsp_and_entry_node(&self.user);
                     self.get_jit_invoice(ctx);
                     self.state = AppState::WaitingForPayment;
                 }
@@ -170,16 +213,24 @@ impl MyApp {
 
     fn show_waiting_for_payment_screen(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(15.0);
+            ui.add_space(10.0);
 
             ui.vertical_centered(|ui| {
+                ui.heading(
+                    egui::RichText::new("Send yourself bitcoin to stabilize.")
+                        .size(16.0)
+                        .strong()
+                        .color(egui::Color32::WHITE),
+                );
+                ui.add_space(10.0);
+
                 if let Some(ref qr) = self.qr_texture {
                     ui.image(qr);
                 } else {
                     ui.label("Lightning QR Missing");
                 }
 
-                ui.add_space(15.0);
+                ui.add_space(10.0);
 
 
                 ui.add(
@@ -190,7 +241,7 @@ impl MyApp {
                         .hint_text("Invoice..."),
                 );
 
-                ui.add_space(15.0);
+                ui.add_space(10.0);
 
                 if ui.add(
                     egui::Button::new(
@@ -198,7 +249,7 @@ impl MyApp {
                             .color(egui::Color32::BLACK)
                             .size(16.0), 
                     )
-                    .min_size(egui::vec2(150.0, 45.0)) // Smaller button size
+                    .min_size(egui::vec2(120.0, 36.0))
                     .fill(egui::Color32::from_gray(220))
                     .rounding(6.0),
                 ).clicked() {
@@ -207,7 +258,7 @@ impl MyApp {
                     });
                 }
                 
-                ui.add_space(10.0); 
+                ui.add_space(5.0); 
                 
                 if ui.add(
                     egui::Button::new(
@@ -215,7 +266,7 @@ impl MyApp {
                             .color(egui::Color32::BLACK)
                             .size(16.0), 
                     )
-                    .min_size(egui::vec2(150.0, 45.0)) 
+                    .min_size(egui::vec2(120.0, 36.0))
                     .fill(egui::Color32::from_gray(220))
                     .rounding(6.0), 
                 ).clicked() {
@@ -228,14 +279,8 @@ impl MyApp {
     }
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
-        // let _connected = self.user.connect(
-        //     PublicKey::from_str("02e897f0ce1bf88afe1f8e2be0045294ec87b00eebd689e42ba7290cfa2922dbe7")
-        //         .unwrap(),
-        //     SocketAddress::from_str("127.0.0.1:9735").unwrap(),
-        //     true,
-        // );
         let result = self.user.bolt11_payment().receive_via_jit_channel(
-            30_000_000,
+            18_780_000,
             "Stable Channel",
             3600,
             Some(10_000_000),
@@ -295,16 +340,18 @@ impl MyApp {
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         let balances = self.user.list_balances();
-                        let lightning_balance_btc = Bitcoin::from_sats(balances.total_lightning_balance_sats);
-                        let lightning_balance_usd =
-                            USD::from_bitcoin(lightning_balance_btc, self.stable_channel.latest_price);
+                        // let lightning_balance_btc = Bitcoin::from_sats(balances.total_lightning_balance_sats);
+                        // let lightning_balance_usd =
+                        //     USD::from_bitcoin(lightning_balance_btc, self.stable_channel.latest_price);
     
+                        let lightning_balance_btc = Bitcoin::from_sats(balances.total_lightning_balance_sats);
+                        let lightning_balance_usd = USD::from_bitcoin(lightning_balance_btc,self.stable_channel.latest_price);
                         ui.add_space(30.0);
     
                         ui.group(|ui| {
                             ui.add_space(20.0);
                         
-                            ui.heading("Your Balance");
+                            ui.heading("Your Stable Balance");
 
                             ui.add(egui::Label::new(
                                 egui::RichText::new(lightning_balance_usd.to_string())
@@ -312,7 +359,8 @@ impl MyApp {
                                     .strong(),
                             ));
         
-                            ui.label(format!("{}", lightning_balance_btc.to_string()));
+                            // ui.label(format!("Pegged USD: $280.00"));
+                            ui.label(format!("Bitcoin: {}", lightning_balance_btc.to_string()));
     
                             ui.add_space(20.0);
                         });
@@ -321,7 +369,7 @@ impl MyApp {
 
                         ui.group(|ui| {
                             ui.add_space(20.0);
-                            ui.heading("Bitcoin Price");
+                            ui.heading("Bitcoin Price ");
                             ui.label(format!("${:.2}", self.stable_channel.latest_price));
                             ui.add_space(20.0);
                         });
@@ -348,11 +396,6 @@ impl MyApp {
                             )
                             .clicked()
                             {
-                                self.status_message = format!(
-                                    "Your Stable Channel is closing and withdrawal transaction to {} is processing.",
-                                    self.close_channel_address
-                                );
-                        
                                 close_channels_to_address(&self.user, self.close_channel_address.clone());
                             }
                         
@@ -373,9 +416,15 @@ impl MyApp {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.heading(
-                    egui::RichText::new(format!("Your withdrawal transaction to {} is processing", self.close_channel_address)).size(28.0).strong(),
+                    egui::RichText::new(format!("Withdrawal processing")).size(28.0).strong(),
+                );    
+            });
+    
+            ui.add_space(20.0);
+            ui.horizontal_centered(|ui| {
+                ui.heading(                    
+                    egui::RichText::new(format!("{}",self.close_channel_address)).size(28.0).strong(), 
                 );
-                ui.add_space(20.0);
             });
         });
     }
@@ -409,6 +458,43 @@ impl MyApp {
         }
     }
 
+    pub fn connect_to_lsp_and_entry_node(&mut self) {
+        let _connected_to_lsp = self.user.connect(
+            PublicKey::from_str("0367631f3a8ca46bccf6d8eae8b728963337f8a6825199386c9a48987ea82b54cd")
+                .unwrap(),
+            SocketAddress::from_str("127.0.0.1:9737").unwrap(),
+            true,
+        );
+    
+        println!("Connection result: {:?}", _connected_to_lsp.unwrap());
+    
+        let _connected_to_exchange = self.user.connect(
+            PublicKey::from_str("03e9d73c317a6113a30e85d7dafcebaa509c1744e0528d392ae975d2e4177d11dc")
+                .unwrap(),
+            SocketAddress::from_str("127.0.0.1:9735").unwrap(),
+            true,
+        );
+    
+        println!("Connection result: {:?}", _connected_to_exchange.unwrap());
+    
+        let node_info = self.user
+            .network_graph()
+            .node(&NodeId::from_pubkey(
+                &PublicKey::from_str("03ebdb4d14e3101c1d63e3d5555db2d15bc50d32bc30919b7dfd3d35609b978ff4")
+                    .unwrap(),
+            ));
+    
+        println!("Node information: {:?}", node_info);
+    
+        let node_info = self.user
+            .network_graph()
+            .node(&NodeId::from_pubkey(
+                &PublicKey::from_str("0367631f3a8ca46bccf6d8eae8b728963337f8a6825199386c9a48987ea82b54cd")
+                    .unwrap(),
+            ));
+    
+        println!("Node information: {:?}", node_info);
+    }
 }
 
 impl App for MyApp {
@@ -416,6 +502,7 @@ impl App for MyApp {
         let now = Instant::now();
         
         if now.duration_since(self.last_stability_check) >= Duration::from_secs(30) {
+            // self.connect_to_lsp_and_entry_node();
             check_stability(&self.user, &mut self.stable_channel);
             self.last_stability_check = now;
         }
@@ -431,18 +518,15 @@ impl App for MyApp {
         
     }
 }
-  
+
 fn main() {
-    std::panic::set_hook(Box::new(|info| {
-        eprintln!("Application panicked: {}", info);
-    }));
-    
-    println!("Starting the app...");
+    let config = config::Config::from_file("src/config.toml");
+
     let native_options = eframe::NativeOptions::default();
     let _ = eframe::run_native(
         "Stable Channels",
         native_options,
-        Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(MyApp::new(cc, config)))),
     );
     println!("App has exited.");
 }

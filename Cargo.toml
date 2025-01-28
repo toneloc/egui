@@ -21,6 +21,8 @@ retry = "1.3"
 futures = "0.3"
 async-trait = "0.1"
 tray-icon = "0.19.2"
+dirs-next = "2.0"
+toml = "0.8"
 
 [dev-dependencies]
 cargo-bundle = "0.6"
