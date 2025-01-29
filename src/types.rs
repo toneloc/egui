@@ -2,9 +2,8 @@ use ldk_node::bitcoin::secp256k1::PublicKey;
 use lightning::ln::types::ChannelId;
 use ldk_node::lightning::offers::offer::Offer;
 use std::ops::{Div, Sub};
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Bitcoin {
     pub sats: u64, // Stored in Satoshis for precision
 }
@@ -50,7 +49,7 @@ impl std::fmt::Display for Bitcoin {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct USD(pub f64);
 
 impl USD {
@@ -100,7 +99,7 @@ impl std::fmt::Display for USD {
     }
 }
 
-// #[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct StableChannel {
     pub channel_id: ChannelId,
     pub is_stable_receiver: bool,
