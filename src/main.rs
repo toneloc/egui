@@ -340,10 +340,7 @@ impl MyApp {
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         let balances = self.user.list_balances();
-                        // let lightning_balance_btc = Bitcoin::from_sats(balances.total_lightning_balance_sats);
-                        // let lightning_balance_usd =
-                        //     USD::from_bitcoin(lightning_balance_btc, self.stable_channel.latest_price);
-    
+
                         let lightning_balance_btc = Bitcoin::from_sats(balances.total_lightning_balance_sats);
                         let lightning_balance_usd = USD::from_bitcoin(lightning_balance_btc,self.stable_channel.latest_price);
                         ui.add_space(30.0);
@@ -359,7 +356,8 @@ impl MyApp {
                                     .strong(),
                             ));
         
-                            // ui.label(format!("Pegged USD: $280.00"));
+                            ui.label(format!("Agreed Peg USD: {}", self.stable_channel.expected_usd));
+
                             ui.label(format!("Bitcoin: {}", lightning_balance_btc.to_string()));
     
                             ui.add_space(20.0);
@@ -372,11 +370,19 @@ impl MyApp {
                             ui.heading("Bitcoin Price ");
                             ui.label(format!("${:.2}", self.stable_channel.latest_price));
                             ui.add_space(20.0);
+                        
+                        let last_updated = self.last_stability_check.elapsed().as_secs();
+                        ui.add_space(5.0);
+                        ui.label(
+                            egui::RichText::new(format!("Last updated: {}s ago", last_updated))
+                                .size(12.0)
+                                .color(egui::Color32::GRAY),
+                        );
                         });
 
-                        ui.add_space(70.0);
+
+                        ui.add_space(20.0);
                         
-                        // Close channel
                         ui.collapsing("Close Channel", |ui| {
                             ui.label("Withdrawal address (minus transaction fees):");
                         
@@ -387,11 +393,9 @@ impl MyApp {
                             if ui.add(
                                 egui::Button::new(
                                     egui::RichText::new("Close Channel")
-                                        .color(egui::Color32::BLACK)
-                                        .size(16.0),
+                                        .color(egui::Color32::WHITE)
+                                        .size(12.0),
                                 )
-                                .min_size(egui::vec2(150.0, 45.0))
-                                .fill(egui::Color32::from_gray(220))
                                 .rounding(6.0),
                             )
                             .clicked()
@@ -436,20 +440,17 @@ impl MyApp {
                     self.state = AppState::MainScreen;
                 }
                 
-                // update UI balances
                 Event::PaymentReceived { .. } => {
                     self.state = AppState::MainScreen;
                     println!("payment received");
                 }
 
-                // update UI balances
                 Event::ChannelClosed { .. } => {
                     self.state = AppState::ClosingScreen;
                     println!("channel closed");
 
 
                 }
-                // Wildcard
                 _ => {
                 
                 }
@@ -518,7 +519,6 @@ impl App for MyApp {
         
     }
 }
-
 fn main() {
     let config = config::Config::from_file("src/config.toml");
 
