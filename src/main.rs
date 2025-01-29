@@ -11,6 +11,12 @@ use ldk_node::{
     lightning::{ln::{msgs::SocketAddress, types::ChannelId}, offers::offer::Offer},
     Builder, ChannelDetails, Node, Event,
 };
+
+use egui::{TextStyle, TextWrapMode};
+use egui::{Color32, Grid};
+use egui_extras::{Column, TableBuilder};
+
+
 use lightning::routing::gossip::NodeId;
 use qrcode::{Color, QrCode};
 use std::{str::FromStr, time::{Duration, Instant}};
@@ -97,8 +103,11 @@ impl MyApp {
         println!("{}", lsp_pubkey);
 
         let user = make_node(&config, Some(lsp_pubkey));
-        let channel_id = if !user.list_channels().is_empty() {
-            user.list_channels()[0].channel_id
+        
+        let channels = user.list_channels();
+        
+        let channel_id = if !channels.is_empty() {
+            channels[0].channel_id
         } else {
             ChannelId::from_bytes([0; 32])
         };
@@ -123,8 +132,10 @@ impl MyApp {
         };
         println!("Stable Channel created: {:?}", stable_channel.channel_id.to_string());
 
-        // Initialize the app state
-        let state = if channel_id != ChannelId::from_bytes([0; 32]) {
+        // TODO = check if channel is closing, how?
+        let state = if channels.len() > 1 {
+            AppState::ClosingScreen
+        } else if channel_id != ChannelId::from_bytes([0; 32]) {
             AppState::MainScreen
         } else {
             AppState::OnboardingScreen
@@ -173,7 +184,7 @@ impl MyApp {
                         .color(egui::Color32::WHITE),
                 );
                 ui.label(
-                    egui::RichText::new("From a Lightning app or an exchange.")
+                    egui::RichText::new("Over Lightning, from an app or an exchange.")
                         .color(egui::Color32::GRAY),
                 );
     
@@ -222,7 +233,9 @@ impl MyApp {
                         .strong()
                         .color(egui::Color32::WHITE),
                 );
-                ui.add_space(10.0);
+                ui.add_space(3.0);
+                ui.label("This is a Bolt11 Lightning invoice.");
+                ui.add_space(8.0);
 
                 if let Some(ref qr) = self.qr_texture {
                     ui.image(qr);
@@ -230,7 +243,7 @@ impl MyApp {
                     ui.label("Lightning QR Missing");
                 }
 
-                ui.add_space(10.0);
+                ui.add_space(8.0);
 
 
                 ui.add(
@@ -241,7 +254,7 @@ impl MyApp {
                         .hint_text("Invoice..."),
                 );
 
-                ui.add_space(10.0);
+                ui.add_space(8.0);
 
                 if ui.add(
                     egui::Button::new(
@@ -273,7 +286,7 @@ impl MyApp {
                     self.state = AppState::OnboardingScreen;
                 }
                 
-                ui.add_space(10.0); 
+                ui.add_space(8.0); 
             });
         });
     }
@@ -333,33 +346,29 @@ impl MyApp {
         }
     }
     
-    fn show_main_screen(&mut self, ctx: &egui::Context) {    
+    fn show_main_screen(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::Frame::none()
                 .inner_margin(epaint::Margin::symmetric(20.0, 0.0))
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
+                        // --- Existing Balance UI ---
                         let balances = self.user.list_balances();
-
                         let lightning_balance_btc = Bitcoin::from_sats(balances.total_lightning_balance_sats);
-                        let lightning_balance_usd = USD::from_bitcoin(lightning_balance_btc,self.stable_channel.latest_price);
+                        let lightning_balance_usd = USD::from_bitcoin(lightning_balance_btc, self.stable_channel.latest_price);
+
                         ui.add_space(30.0);
-    
+
                         ui.group(|ui| {
                             ui.add_space(20.0);
-                        
                             ui.heading("Your Stable Balance");
-
                             ui.add(egui::Label::new(
                                 egui::RichText::new(lightning_balance_usd.to_string())
                                     .size(36.0)
                                     .strong(),
                             ));
-        
                             ui.label(format!("Agreed Peg USD: {}", self.stable_channel.expected_usd));
-
                             ui.label(format!("Bitcoin: {}", lightning_balance_btc.to_string()));
-    
                             ui.add_space(20.0);
                         });
 
@@ -367,53 +376,132 @@ impl MyApp {
 
                         ui.group(|ui| {
                             ui.add_space(20.0);
-                            ui.heading("Bitcoin Price ");
+                            ui.heading("Bitcoin Price");
                             ui.label(format!("${:.2}", self.stable_channel.latest_price));
                             ui.add_space(20.0);
-                        
-                        let last_updated = self.last_stability_check.elapsed().as_secs();
-                        ui.add_space(5.0);
-                        ui.label(
-                            egui::RichText::new(format!("Last updated: {}s ago", last_updated))
-                                .size(12.0)
-                                .color(egui::Color32::GRAY),
-                        );
+
+                            let last_updated = self.last_stability_check.elapsed().as_secs();
+                            ui.add_space(5.0);
+                            ui.label(
+                                egui::RichText::new(format!("Last updated: {}s ago", last_updated))
+                                    .size(12.0)
+                                    .color(Color32::GRAY),
+                            );
                         });
 
-
                         ui.add_space(20.0);
-                        
-                        ui.collapsing("Close Channel", |ui| {
-                            ui.label("Withdrawal address (minus transaction fees):");
-                        
-                            ui.add_space(10.0);
-                            ui.text_edit_singleline(&mut self.close_channel_address);
-                            ui.add_space(10.0);
-                        
-                            if ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new("Close Channel")
-                                        .color(egui::Color32::WHITE)
-                                        .size(12.0),
+
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false; 2])
+                            .show(ui, |ui| {
+
+                            ui.heading("Transactions (Mock)");
+                            ui.separator();
+                            ui.add_space(8.0);
+        
+                            // Clean up the top part: use a grid for alignment
+                            Grid::new("transaction_header_grid")
+                                .num_columns(2)
+                                .spacing([6.0, 6.0])
+                                .show(ui, |ui| {
+                                    ui.label("ChannelId:");
+                                    ui.label("81232342033");
+                                    ui.end_row();
+        
+                                    ui.label("Counterparty ID:");
+                                    ui.label("0x2ae3869f29e9a2932909dc304");
+                                    ui.end_row();
+        
+                                    ui.label("Agreed Stable Amount:");
+                                    ui.label("$19.00");
+                                    ui.end_row();
+        
+                                    ui.label("Settlement:");
+                                    ui.label("every 1 minute");
+                                    ui.end_row();
+        
+                                    ui.label("Expected Duration:");
+                                    ui.label("over 3 months");
+                                    ui.end_row();
+                                });
+        
+                            ui.add_space(8.0);
+        
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false; 2]) // Don’t shrink automatically
+                                .show(ui, |ui| {
+                                    let mock_transactions = vec![
+                                        ("10s ago", "0.00005 BTC", "$23,450"),
+                                        ("30s ago", "0.00012 BTC", "$23,445"),
+                                        ("1m ago",  "0.00009 BTC", "$23,440"),
+                                        // Add/replace with real data
+                                    ];
+        
+                                    TableBuilder::new(ui)
+                                        .striped(true)
+                                        .resizable(true)
+                                        .column(Column::remainder().at_least(150.0))
+                                        .column(Column::remainder().at_least(150.0))
+                                        .column(Column::remainder().at_least(150.0))
+                                        .header(20.0, |mut header| {
+                                            header.col(|ui| {
+                                                ui.strong("Settlement Period");
+                                            });
+                                            header.col(|ui| {
+                                                ui.strong("Bitcoin");
+                                            });
+                                            header.col(|ui| {
+                                                ui.strong("Latest Price");
+                                            });
+                                        })
+                                        .body(|mut body| {
+                                            for (settlement_period, btc_amount, price) in mock_transactions {
+                                                body.row(18.0, |mut row| {
+                                                    row.col(|ui| {
+                                                        ui.label(settlement_period);
+                                                    });
+                                                    row.col(|ui| {
+                                                        ui.label(btc_amount);
+                                                    });
+                                                    row.col(|ui| {
+                                                        ui.label(price);
+                                                    });
+                                                });
+                                            }
+                                        });
+                                });
+        
+                            ui.add_space(30.0);
+        
+                            ui.collapsing("Close Channel", |ui| {
+                                ui.label("Withdrawal address (minus transaction fees):");
+                                ui.add_space(10.0);
+                                ui.text_edit_singleline(&mut self.close_channel_address);
+                                ui.add_space(10.0);
+
+                                if ui.add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Close Channel")
+                                            .color(egui::Color32::WHITE)
+                                            .size(12.0),
+                                    )
+                                    .rounding(6.0),
                                 )
-                                .rounding(6.0),
-                            )
-                            .clicked()
-                            {
-                                close_channels_to_address(&self.user, self.close_channel_address.clone());
-                            }
-                        
+                                .clicked()
+                                {
+                                    close_channels_to_address(&self.user, self.close_channel_address.clone());
+                                }
+                            });
+
                             ui.add_space(20.0);
-                        
+
                             if !self.status_message.is_empty() {
                                 ui.label(self.status_message.clone());
                             }
                         });
-                        
                     });
                 });
         });
-
     }
 
     fn show_closing_screen(&mut self, ctx: &egui::Context) {

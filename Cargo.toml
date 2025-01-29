@@ -6,7 +6,7 @@ rust-version = "1.83"
 
 [dependencies]
 ldk-node = "=0.4.2"
-lightning = "=0.0.125"  # Pin to specific version
+lightning = "=0.0.125"  
 lightning-liquidity = "=0.1.0-alpha.6"
 eframe = "=0.30.0"
 egui = { version = "0.30.0", default-features = false, features = ["color-hex"] }
