@@ -7,19 +7,19 @@ use eframe::{egui, App, Frame};
 use egui::{epaint::{self, Margin}, TextureHandle, TextureOptions};
 use image::{GrayImage, Luma};
 use ldk_node::{
-    bitcoin::{address, secp256k1::PublicKey, Address, Network},
-    lightning::{ln::{msgs::SocketAddress, types::ChannelId}, offers::offer::Offer},
-    Builder, ChannelDetails, Node, Event,
+    bitcoin::{address, secp256k1::PublicKey, Address, Network}, lightning::{ln::{msgs::SocketAddress, types::ChannelId}, offers::offer::Offer}, lightning_invoice::{Bolt11InvoiceDescription, Description}, Builder, ChannelDetails, Event, Node
 };
+
+use ldk_node::lightning::routing::gossip::NodeId;
+
 
 use egui::{TextStyle, TextWrapMode};
 use egui::{Color32, Grid};
 use egui_extras::{Column, TableBuilder};
 
 
-use lightning::routing::gossip::NodeId;
 use qrcode::{Color, QrCode};
-use std::{str::FromStr, time::{Duration, Instant}};
+use std::{path::PathBuf, str::FromStr, time::{Duration, Instant}};
 use dirs_next as dirs;
 
 use crate::config::Config;
@@ -51,10 +51,19 @@ fn make_node(config: &Config, lsp_pubkey: Option<PublicKey>) -> Node {
 
     // Use values from config rather than hardcoding
     if let Some(lsp_pubkey) = lsp_pubkey {
+
         let address = config.lsp.address.parse().unwrap();
+
+        // builder.set_liquidity_source_lsps1(lsp_pubkey, 
+        //     address, 
+        //     Some(config.lsp.auth.clone())
+        // );
+
+        // let address = config.lsp.address.parse().unwrap();
+
         builder.set_liquidity_source_lsps2(
-            address,
             lsp_pubkey,
+            address,
             Some(config.lsp.auth.clone()),
         );
     }
@@ -292,9 +301,11 @@ impl MyApp {
     }
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
+        let description = Bolt11InvoiceDescription::Direct(Description::new("Stable Channel JIT payment".to_string()).unwrap());
+        
         let result = self.user.bolt11_payment().receive_via_jit_channel(
-            18_780_000,
-            "Stable Channel",
+            20_779_000, // 20,686 //20,779
+            &description,
             3600,
             Some(10_000_000),
         );
@@ -357,6 +368,16 @@ impl MyApp {
                         let lightning_balance_btc = Bitcoin::from_sats(balances.total_lightning_balance_sats);
                         let lightning_balance_usd = USD::from_bitcoin(lightning_balance_btc, self.stable_channel.latest_price);
 
+
+                        let result = self.user.lsps1_liquidity().request_channel(
+                            50_000_000, 
+                            50_000_000, 
+                            3600, 
+                            false).unwrap();
+
+                        println!("Payment Info: {:?}", result.payment_options.bolt11.unwrap());
+
+                        
                         ui.add_space(30.0);
 
                         ui.group(|ui| {
@@ -395,83 +416,83 @@ impl MyApp {
                             .auto_shrink([false; 2])
                             .show(ui, |ui| {
 
-                            ui.heading("Transactions (Mock)");
-                            ui.separator();
-                            ui.add_space(8.0);
+                            // ui.heading("Transactions (Mock)");
+                            // ui.separator();
+                            // ui.add_space(8.0);
         
-                            // Clean up the top part: use a grid for alignment
-                            Grid::new("transaction_header_grid")
-                                .num_columns(2)
-                                .spacing([6.0, 6.0])
-                                .show(ui, |ui| {
-                                    ui.label("ChannelId:");
-                                    ui.label("81232342033");
-                                    ui.end_row();
+                            // // Clean up the top part: use a grid for alignment
+                            // Grid::new("transaction_header_grid")
+                            //     .num_columns(2)
+                            //     .spacing([6.0, 6.0])
+                            //     .show(ui, |ui| {
+                            //         ui.label("ChannelId:");
+                            //         ui.label("81232342033");
+                            //         ui.end_row();
         
-                                    ui.label("Counterparty ID:");
-                                    ui.label("0x2ae3869f29e9a2932909dc304");
-                                    ui.end_row();
+                            //         ui.label("Counterparty ID:");
+                            //         ui.label("0x2ae3869f29e9a2932909dc304");
+                            //         ui.end_row();
         
-                                    ui.label("Agreed Stable Amount:");
-                                    ui.label("$19.00");
-                                    ui.end_row();
+                            //         ui.label("Agreed Stable Amount:");
+                            //         ui.label("$19.00");
+                            //         ui.end_row();
         
-                                    ui.label("Settlement:");
-                                    ui.label("every 1 minute");
-                                    ui.end_row();
+                            //         ui.label("Settlement:");
+                            //         ui.label("every 1 minute");
+                            //         ui.end_row();
         
-                                    ui.label("Expected Duration:");
-                                    ui.label("over 3 months");
-                                    ui.end_row();
-                                });
+                            //         ui.label("Expected Duration:");
+                            //         ui.label("over 3 months");
+                            //         ui.end_row();
+                            //     });
         
-                            ui.add_space(8.0);
+                            // ui.add_space(8.0);
         
-                            egui::ScrollArea::vertical()
-                                .auto_shrink([false; 2]) // Don’t shrink automatically
-                                .show(ui, |ui| {
-                                    let mock_transactions = vec![
-                                        ("10s ago", "0.00005 BTC", "$23,450"),
-                                        ("30s ago", "0.00012 BTC", "$23,445"),
-                                        ("1m ago",  "0.00009 BTC", "$23,440"),
-                                        // Add/replace with real data
-                                    ];
+                            // egui::ScrollArea::vertical()
+                            //     .auto_shrink([false; 2]) // Don’t shrink automatically
+                            //     .show(ui, |ui| {
+                            //         let mock_transactions = vec![
+                            //             ("10s ago", "0.00005 BTC", "$23,450"),
+                            //             ("30s ago", "0.00012 BTC", "$23,445"),
+                            //             ("1m ago",  "0.00009 BTC", "$23,440"),
+                            //             // Add/replace with real data
+                            //         ];
         
-                                    TableBuilder::new(ui)
-                                        .striped(true)
-                                        .resizable(true)
-                                        .column(Column::remainder().at_least(150.0))
-                                        .column(Column::remainder().at_least(150.0))
-                                        .column(Column::remainder().at_least(150.0))
-                                        .header(20.0, |mut header| {
-                                            header.col(|ui| {
-                                                ui.strong("Settlement Period");
-                                            });
-                                            header.col(|ui| {
-                                                ui.strong("Bitcoin");
-                                            });
-                                            header.col(|ui| {
-                                                ui.strong("Latest Price");
-                                            });
-                                        })
-                                        .body(|mut body| {
-                                            for (settlement_period, btc_amount, price) in mock_transactions {
-                                                body.row(18.0, |mut row| {
-                                                    row.col(|ui| {
-                                                        ui.label(settlement_period);
-                                                    });
-                                                    row.col(|ui| {
-                                                        ui.label(btc_amount);
-                                                    });
-                                                    row.col(|ui| {
-                                                        ui.label(price);
-                                                    });
-                                                });
-                                            }
-                                        });
-                                });
+                            //         TableBuilder::new(ui)
+                            //             .striped(true)
+                            //             .resizable(true)
+                            //             .column(Column::remainder().at_least(150.0))
+                            //             .column(Column::remainder().at_least(150.0))
+                            //             .column(Column::remainder().at_least(150.0))
+                            //             .header(20.0, |mut header| {
+                            //                 header.col(|ui| {
+                            //                     ui.strong("Settlement Period");
+                            //                 });
+                            //                 header.col(|ui| {
+                            //                     ui.strong("Bitcoin");
+                            //                 });
+                            //                 header.col(|ui| {
+                            //                     ui.strong("Latest Price");
+                            //                 });
+                            //             })
+                            //             .body(|mut body| {
+                            //                 for (settlement_period, btc_amount, price) in mock_transactions {
+                            //                     body.row(18.0, |mut row| {
+                            //                         row.col(|ui| {
+                            //                             ui.label(settlement_period);
+                            //                         });
+                            //                         row.col(|ui| {
+                            //                             ui.label(btc_amount);
+                            //                         });
+                            //                         row.col(|ui| {
+                            //                             ui.label(price);
+                            //                         });
+                            //                     });
+                            //                 }
+                            //             });
+                            //     });
         
-                            ui.add_space(30.0);
+                            // ui.add_space(30.0);
         
                             ui.collapsing("Close Channel", |ui| {
                                 ui.label("Withdrawal address (minus transaction fees):");
@@ -525,6 +546,7 @@ impl MyApp {
         while let Some(event) = self.user.next_event() {
             match event {
                 Event::ChannelReady { .. } => {
+                    check_stability(&self.user, &mut self.stable_channel);
                     self.state = AppState::MainScreen;
                 }
                 
@@ -556,7 +578,7 @@ impl MyApp {
         );
     
         println!("Connection result: {:?}", _connected_to_lsp.unwrap());
-    
+
         let _connected_to_exchange = self.user.connect(
             PublicKey::from_str("03e9d73c317a6113a30e85d7dafcebaa509c1744e0528d392ae975d2e4177d11dc")
                 .unwrap(),
@@ -566,6 +588,7 @@ impl MyApp {
     
         println!("Connection result: {:?}", _connected_to_exchange.unwrap());
     
+
         let node_info = self.user
             .network_graph()
             .node(&NodeId::from_pubkey(
@@ -608,7 +631,16 @@ impl App for MyApp {
     }
 }
 fn main() {
-    let config = config::Config::from_file("src/config.toml");
+    // TODO remove hardcode
+    let config_path = PathBuf::from("/Users/t/Drive/egui/src/config.toml");
+
+    if !config_path.exists() {
+        panic!("Configuration file not found at {:?}", config_path);
+    }
+
+    println!("Using config file: {:?}", config_path);
+
+    let config = config::Config::from_file(config_path.to_str().unwrap());
 
     let native_options = eframe::NativeOptions::default();
     let _ = eframe::run_native(

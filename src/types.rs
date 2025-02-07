@@ -1,5 +1,5 @@
 use ldk_node::bitcoin::secp256k1::PublicKey;
-use lightning::ln::types::ChannelId;
+use ldk_node::lightning::ln::types::ChannelId;
 use ldk_node::lightning::offers::offer::Offer;
 use std::ops::{Div, Sub};
 use serde::{Deserialize, Serialize};

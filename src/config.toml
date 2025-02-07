@@ -11,5 +11,7 @@ alias = "user"
 port = 9736
 
 [stable_channel_defaults]
-expected_usd = 19.0
+expected_usd = 20.0
 sc_dir = ".data"
+
+resources = ["src/config.toml"]
