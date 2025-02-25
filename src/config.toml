@@ -6,7 +6,7 @@ auth = "00000000000000000000000000000000"
 [node]
 network = "signet"
 chain_source_url = "https://mutinynet.com/api/"
-data_dir = ".data"
+data_dir = "/Users/t/Drive/user/egui"
 alias = "user"
 port = 9736
 

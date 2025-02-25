@@ -19,7 +19,7 @@ use egui_extras::{Column, TableBuilder};
 
 
 use qrcode::{Color, QrCode};
-use std::{path::PathBuf, str::FromStr, time::{Duration, Instant}};
+use std::{fs, path::PathBuf, str::FromStr, time::{Duration, Instant}};
 use dirs_next as dirs;
 
 use crate::config::Config;
@@ -47,34 +47,22 @@ struct MyApp {
 }
 
 fn make_node(config: &Config, lsp_pubkey: Option<PublicKey>) -> Node {
+    println!("Config used for make_node: {:?}", config);
+
     let mut builder = Builder::new();
-
-    // Use values from config rather than hardcoding
     if let Some(lsp_pubkey) = lsp_pubkey {
-
         let address = config.lsp.address.parse().unwrap();
-
-        // builder.set_liquidity_source_lsps1(lsp_pubkey, 
-        //     address, 
-        //     Some(config.lsp.auth.clone())
-        // );
-
-        // let address = config.lsp.address.parse().unwrap();
-
-        builder.set_liquidity_source_lsps2(
-            address,
-            lsp_pubkey,
-            Some(config.lsp.auth.clone()),
-        );
+        println!("Setting LSP with address: {} and pubkey: {:?}", address, lsp_pubkey);
+        builder.set_liquidity_source_lsps2(address, lsp_pubkey, Some(config.lsp.auth.clone()));
     }
 
     let network = match config.node.network.to_lowercase().as_str() {
         "signet" => Network::Signet,
         "testnet" => Network::Testnet,
         "bitcoin" => Network::Bitcoin,
-        // fallback
         _ => Network::Signet,
     };
+    println!("Network set to: {:?}", network);
 
     builder.set_network(network);
     builder.set_chain_source_esplora(config.node.chain_source_url.clone(), None);
@@ -82,6 +70,14 @@ fn make_node(config: &Config, lsp_pubkey: Option<PublicKey>) -> Node {
     let mut dir = dirs::home_dir().unwrap();
     dir.push(&config.node.data_dir);
     dir.push(&config.node.alias);
+    println!("Storage directory: {:?}", dir);
+
+    if !dir.exists() {
+        println!("ERROR: Data directory {:?} does not exist!", dir);
+    } else {
+        println!("Data directory exists: {:?}", dir);
+    }
+
     builder.set_storage_dir_path(dir.to_string_lossy().to_string());
 
     builder
@@ -92,18 +88,24 @@ fn make_node(config: &Config, lsp_pubkey: Option<PublicKey>) -> Node {
 
     builder.set_node_alias(config.node.alias.clone());
 
-    let node = builder.build().unwrap();
-    node.start().unwrap();
+    let node = match builder.build() {
+        Ok(node) => {
+            println!("Node built successfully.");
+            node
+        }
+        Err(e) => {
+            panic!("Node build failed: {:?}", e);
+        }
+    };
 
-    if let Some(first_address) = node.listening_addresses().unwrap().first() {
-        println!("\nActor Role: {}", config.node.alias);
-        println!("Public Key: {}", node.node_id());
-        println!("Internet Address: {}\n", first_address);
-    } else {
-        println!("No listening addresses found.");
+    if let Err(e) = node.start() {
+        panic!("Node start failed: {:?}", e);
     }
+    
+    println!("Node started with ID: {:?}", node.node_id());
     node
 }
+
 
 impl MyApp {
     fn new(_cc: &eframe::CreationContext<'_>, config: Config) -> Self {
@@ -622,7 +624,13 @@ impl App for MyApp {
 }
 fn main() {
     // TODO remove hardcode
-    let config_path = PathBuf::from("/Users/t/Drive/egui/src/config.toml");
+    let config_path = PathBuf::from("/Users/t/Drive/user/egui/src/config.toml");
+
+    match fs::read_to_string(&config_path) {
+        Ok(contents) => println!("Config File Contents:\n{}", contents),
+        Err(e) => panic!("Error reading config file: {:?}", e),
+    }
+
 
     if !config_path.exists() {
         panic!("Configuration file not found at {:?}", config_path);
