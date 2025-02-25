@@ -62,8 +62,8 @@ fn make_node(config: &Config, lsp_pubkey: Option<PublicKey>) -> Node {
         // let address = config.lsp.address.parse().unwrap();
 
         builder.set_liquidity_source_lsps2(
-            lsp_pubkey,
             address,
+            lsp_pubkey,
             Some(config.lsp.auth.clone()),
         );
     }
@@ -301,11 +301,11 @@ impl MyApp {
     }
 
     fn get_jit_invoice(&mut self, ctx: &egui::Context) {
-        let description = Bolt11InvoiceDescription::Direct(Description::new("Stable Channel JIT payment".to_string()).unwrap());
-        
+        let description = "Stable Channel JIT payment";
+    
         let result = self.user.bolt11_payment().receive_via_jit_channel(
-            20_779_000, // 20,686 //20,779
-            &description,
+            20_779_000,
+            description,
             3600,
             Some(10_000_000),
         );
@@ -367,17 +367,7 @@ impl MyApp {
                         let balances = self.user.list_balances();
                         let lightning_balance_btc = Bitcoin::from_sats(balances.total_lightning_balance_sats);
                         let lightning_balance_usd = USD::from_bitcoin(lightning_balance_btc, self.stable_channel.latest_price);
-
-
-                        let result = self.user.lsps1_liquidity().request_channel(
-                            50_000_000, 
-                            50_000_000, 
-                            3600, 
-                            false).unwrap();
-
-                        println!("Payment Info: {:?}", result.payment_options.bolt11.unwrap());
-
-                        
+              
                         ui.add_space(30.0);
 
                         ui.group(|ui| {

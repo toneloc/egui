@@ -222,7 +222,7 @@ pub fn close_channels_to_address(node: &Node, address_str: String) {
 
         Ok(addr) => match addr.require_network(Network::Signet,) {
             Ok(addr_checked) => {
-                match node.onchain_payment().send_all_to_address(&addr_checked, false, None) {
+                match node.onchain_payment().send_all_to_address(&addr_checked) {
                     Ok(txid) => println!("{}", txid),
                     Err(e) => eprintln!("Error: {}", e),
                 }
