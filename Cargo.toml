@@ -5,9 +5,9 @@ edition = "2021"
 rust-version = "1.83"
 
 [dependencies]
-ldk-node = "=0.4.2"
+ldk-node = { git = "https://github.com/lightningdevkit/ldk-node.git", rev = "503f3b772797d4f6d23815e252586ccb637a6da2" }
 lightning = "=0.0.125"  
-lightning-liquidity = "=0.1.0-alpha.6"
+lightning-liquidity = "=0.1.0"
 eframe = "=0.30.0"
 egui = { version = "0.30.0", default-features = false, features = ["color-hex"] }
 egui_extras = { version = "0.30.0", features = ["default"] }
